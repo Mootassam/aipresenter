@@ -2,6 +2,9 @@
 
 Several Claude Code sessions (the owner's and a teammate's) may work on this repo. Read this first.
 
+**When resuming work, read `docs/PROGRESS.md` first.** It has the current status, open
+questions and decisions already made. Update it at the end of every phase or session.
+
 ## Project
 Commercial desktop app "AI Presenter": webcam + mic → live AI character video + voice changer
 → virtual camera/mic for streaming. Roadmap and decisions: `docs/PLAN.md`. Design:
