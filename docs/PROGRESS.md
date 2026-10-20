@@ -8,8 +8,15 @@ Last updated: 2026-10-20
 |---|---|
 | 0 Project setup | ✅ done (commit 50c435d) |
 | 1 Tracking + virtual camera | ✅ done (commit b43ab8e). softcam DLL not built yet (no compiler on the laptop) |
-| 2 Voice changer | ⏳ next, waiting on the owner (see below) |
-| 3–9 | not started |
+| 2 Voice changer | ⏳ waiting on the owner (see below) |
+| 3 Avatar v1 (head + shoulders) | 🔨 part 1 done on branch `phase3-avatar` (commit 7923553): LivePortrait engine works (checked on CPU). Next: GPU speed test on RunPod (`tools/runpod_bench.sh`), then TensorRT, lip-sync hook, better matting |
+| 4–9 | not started |
+
+## Phase 3 notes
+- The laptop's GTX 1050 is not supported by PyTorch cu128, so the avatar runs on the CPU there (8 s/frame, for checking quality only).
+- SSH key for RunPod: `~/.ssh/aip_runpod` (the owner pastes the .pub into RunPod → Settings → SSH Public Keys).
+- RunPod test: the owner deploys an RTX 4090 pod and gives Claude the SSH command; Claude copies the code + samples and runs `bash tools/runpod_bench.sh 60` (self-stop after 60 min). Then make sure the pod is TERMINATED.
+- `samples/character.png` (1330×1182) passes the quality check; one tip: the hair touches the top edge.
 
 ## Waiting on the owner before Phase 2
 
