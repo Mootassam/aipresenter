@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Build / packaging
+build/
+dist/
+*.spec
+
+# Models, data and secrets never go into git
+models/
+data/
+*.pth
+*.onnx
+*.engine
+*.safetensors
+*.ckpt
+*.enc
+.env
+config/local.yaml
+
+# Media used for mock input
+samples/*.mp4
+samples/*.wav
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

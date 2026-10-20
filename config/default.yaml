@@ -1,0 +1,55 @@
+# AI Presenter default configuration.
+# Copy to config/local.yaml (git-ignored) to override values on your machine,
+# or use environment variables, e.g. AIP_VIDEO__SOURCE=file.
+# Secrets (API keys, license key) never go in this file.
+
+mode: local            # local | cloud
+
+video:
+  source: camera       # camera | file  (file = mock input for the cloud dev box)
+  camera_index: 0
+  file_path: null
+  loop_file: true
+  capture_width: 1280
+  capture_height: 720
+  fps: 30
+  render_width: 512    # avatar is rendered at this size, then upscaled
+  render_height: 768
+  output_width: 1280
+  output_height: 720
+
+audio:
+  source: mic          # mic | file
+  input_device: null   # null = system default
+  output_device: "CABLE Input"   # VB-Audio Virtual Cable
+  file_path: null
+  host_api: wasapi     # wasapi | asio  (never MME)
+  sample_rate: 48000
+  block_ms: 20
+
+tracking:
+  backend: mediapipe   # mediapipe | rtmw
+  face: true
+  pose: true
+  hands: true
+  max_hands: 2
+  smoothing:      { min_cutoff: 1.0, beta: 0.05, d_cutoff: 1.0 }
+  hand_smoothing: { min_cutoff: 1.5, beta: 0.1,  d_cutoff: 1.0 }
+
+output:
+  virtual_camera: true
+  virtual_mic: true
+  ai_label: true
+  background_path: null
+
+cloud:
+  provider: runpod
+  max_session_minutes: 35
+  warn_before_stop_minutes: 5
+  connection_lost_grace_seconds: 60
+
+logging:
+  level: INFO
+  json_format: false
+  max_file_mb: 10
+  backup_count: 5
