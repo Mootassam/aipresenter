@@ -99,6 +99,38 @@ class TrackingConfig(_Section):
     """Expressions (blinks!) must react fast, so only light smoothing."""
 
 
+class AvatarConfig(_Section):
+    renderer: Literal["debug", "liveportrait"] = "debug"
+    character_image: Path | None = None
+    device: str = "cuda"
+    fp16: bool | None = None
+    """None = automatic (on for RTX 20xx and newer)."""
+    compile: bool = False
+    """torch.compile the per-frame networks (needs Triton: Linux / cloud worker)."""
+    canvas_height: int = Field(768, ge=256, le=2160, multiple_of=2)
+    """The character is rendered at this height, then scaled to the output size."""
+    pose_strength: float = Field(1.0, ge=0.0, le=2.0)
+    expression_strength: float = Field(1.0, ge=0.0, le=2.0)
+    stitching: bool = True
+    """Blend the animated head into the still shoulders (strongly recommended)."""
+    eye_retarget: bool = False
+    """Drive blinks from MediaPipe eye openness in addition to LivePortrait's own motion."""
+    background: Literal["original", "color", "image"] = "original"
+    background_color: str = "#00b140"
+    """Used when background is "color" (default: chroma green)."""
+    pose_smoothing: OneEuroConfig = OneEuroConfig(min_cutoff=1.0, beta=0.05, d_cutoff=1.0)
+    """Head pose (degrees) + translation + scale."""
+    expression_smoothing: OneEuroConfig = OneEuroConfig(min_cutoff=2.5, beta=2.0, d_cutoff=1.0)
+    lost_face_ease_s: float = Field(0.5, ge=0.0, le=5.0)
+    """When the face disappears, glide back to the neutral pose over this time."""
+
+    @model_validator(mode="after")
+    def _needs_image(self) -> Self:
+        if self.renderer == "liveportrait" and self.character_image is None:
+            raise ValueError("avatar.character_image is required for the liveportrait renderer")
+        return self
+
+
 class OutputConfig(_Section):
     virtual_camera: bool = True
     softcam_dll: Path | None = None
@@ -147,6 +179,7 @@ class Settings(BaseSettings):
     video: VideoConfig = VideoConfig()
     audio: AudioConfig = AudioConfig()
     tracking: TrackingConfig = TrackingConfig()
+    avatar: AvatarConfig = AvatarConfig()
     output: OutputConfig = OutputConfig()
     cloud: CloudConfig = CloudConfig()
     logging: LoggingConfig = LoggingConfig()

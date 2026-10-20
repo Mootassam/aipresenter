@@ -43,6 +43,23 @@ tracking:
   hand_smoothing:       { min_cutoff: 1.5, beta: 10.0, d_cutoff: 1.0 }
   blendshape_smoothing: { min_cutoff: 3.0, beta: 1.0,  d_cutoff: 1.0 }
 
+avatar:
+  renderer: debug          # debug (Phase 1 overlay) | liveportrait (Phase 3)
+  character_image: null
+  device: cuda
+  fp16: null               # null = auto (on for RTX 20xx+)
+  compile: false           # torch.compile (Linux / cloud only)
+  canvas_height: 768
+  pose_strength: 1.0       # 0..2, how much head movement is copied
+  expression_strength: 1.0 # 0..2
+  stitching: true
+  eye_retarget: false
+  background: original     # original | color | image (image = output.background_path)
+  background_color: "#00b140"
+  pose_smoothing:       { min_cutoff: 1.0, beta: 0.05, d_cutoff: 1.0 }
+  expression_smoothing: { min_cutoff: 2.5, beta: 2.0,  d_cutoff: 1.0 }
+  lost_face_ease_s: 0.5
+
 output:
   virtual_camera: true
   softcam_dll: null    # default: %LOCALAPPDATA%\AIPresenter\bin\softcam.dll

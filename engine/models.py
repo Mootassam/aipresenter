@@ -16,6 +16,8 @@ from pathlib import Path
 log = logging.getLogger(__name__)
 
 _MP = "https://storage.googleapis.com/mediapipe-models"
+# LivePortrait weights (MIT), pinned to an exact Hugging Face revision.
+_LP = "https://huggingface.co/KlingTeam/LivePortrait/resolve/82a4fa6735ca58432b6ce39301b4b9ee066dea47/liveportrait"
 
 
 @dataclass(frozen=True)
@@ -65,8 +67,58 @@ MODELS: dict[str, ModelSpec] = {
             "64437af838a65d18e5ba7a0d39b465540069bc8aae8308de3e318aad31fcbc7b",
             "Apache-2.0",
         ),
+        ModelSpec(
+            "selfie_multiclass",
+            "selfie_multiclass_256x256.tflite",
+            f"{_MP}/image_segmenter/selfie_multiclass_256x256/float32/1/selfie_multiclass_256x256.tflite",
+            "c6748b1253a99067ef71f7e26ca71096cd449baefa8f101900ea23016507e0e0",
+            "Apache-2.0",
+        ),
+        ModelSpec(
+            "lp_appearance_feature_extractor",
+            "liveportrait/appearance_feature_extractor.pth",
+            f"{_LP}/base_models/appearance_feature_extractor.pth",
+            "5279bb8654293dbdf327030b397f107237dd9212fb11dd75b83dfb635211ceb5",
+            "MIT",
+        ),
+        ModelSpec(
+            "lp_motion_extractor",
+            "liveportrait/motion_extractor.pth",
+            f"{_LP}/base_models/motion_extractor.pth",
+            "251e6a94ad667a1d0c69526d292677165110ef7f0cf0f6d199f0e414e8aa0ca5",
+            "MIT",
+        ),
+        ModelSpec(
+            "lp_warping_module",
+            "liveportrait/warping_module.pth",
+            f"{_LP}/base_models/warping_module.pth",
+            "2f61a6f265fe344f14132364859a78bdbbc2068577170693da57fb96d636e282",
+            "MIT",
+        ),
+        ModelSpec(
+            "lp_spade_generator",
+            "liveportrait/spade_generator.pth",
+            f"{_LP}/base_models/spade_generator.pth",
+            "4780afc7909a9f84e24c01d73b31a555ef651521a1fe3b2429bd04534d992aee",
+            "MIT",
+        ),
+        ModelSpec(
+            "lp_stitching_retargeting",
+            "liveportrait/stitching_retargeting_module.pth",
+            f"{_LP}/retargeting_models/stitching_retargeting_module.pth",
+            "3652d5a3f95099141a56986aaddec92fadf0a73c87a20fac9a2c07c32b28b611",
+            "MIT",
+        ),
     )
 }
+
+LIVEPORTRAIT_MODELS = (
+    "lp_appearance_feature_extractor",
+    "lp_motion_extractor",
+    "lp_warping_module",
+    "lp_spade_generator",
+    "lp_stitching_retargeting",
+)
 
 
 class ModelIntegrityError(RuntimeError):
@@ -88,7 +140,7 @@ def ensure_model(name: str, models_dir: Path, *, timeout_s: float = 60.0) -> Pat
     if dest.exists() and sha256_file(dest) == spec.sha256:
         return dest
 
-    models_dir.mkdir(parents=True, exist_ok=True)
+    dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(dest.suffix + ".part")
     log.info("Downloading model %s", spec.name)
     try:

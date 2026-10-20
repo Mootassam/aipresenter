@@ -11,6 +11,7 @@ from __future__ import annotations
 import ctypes
 import logging
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
 
@@ -61,8 +62,15 @@ class NullSink:
 class PreviewWindow:
     """OpenCV window for development. Pressing Q or Esc sets ``quit_requested``."""
 
-    def __init__(self, width: int, height: int, title: str = "AI Presenter preview") -> None:
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        title: str = "AI Presenter preview",
+        on_key: Callable[[str], None] | None = None,
+    ) -> None:
         self.width, self.height, self.title = width, height, title
+        self.on_key = on_key
         self.quit_requested = False
 
     def send(self, img: Image) -> None:
@@ -72,11 +80,32 @@ class PreviewWindow:
         key = cv2.waitKey(1) & 0xFF
         if key in (ord("q"), 27) or cv2.getWindowProperty(self.title, cv2.WND_PROP_VISIBLE) < 1:
             self.quit_requested = True
+        elif key != 255 and self.on_key is not None:
+            self.on_key(chr(key))
 
     def close(self) -> None:
         import cv2
 
         cv2.destroyWindow(self.title)
+
+
+class RecorderSink:
+    """Writes the output to an .mp4 file (for reviewing quality, e.g. from a RunPod test)."""
+
+    def __init__(self, path: Path, width: int, height: int, fps: float) -> None:
+        import cv2
+
+        self.width, self.height, self.path = width, height, path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._w = cv2.VideoWriter(str(path), cv2.VideoWriter.fourcc(*"mp4v"), fps, (width, height))
+        if not self._w.isOpened():
+            raise RuntimeError(f"cannot write video {path}")
+
+    def send(self, img: Image) -> None:
+        self._w.write(img)
+
+    def close(self) -> None:
+        self._w.release()
 
 
 class SoftcamNotAvailable(RuntimeError):

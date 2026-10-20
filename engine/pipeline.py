@@ -168,6 +168,8 @@ class VideoPipeline:
                         frame, track, self._hud_lines(track) if self.hud else None
                     )
                 self._stage("render", sw.elapsed_ms)
+                for k, v in getattr(self.renderer, "timings_ms", {}).items():
+                    self._stage(f"  {k}", v)
 
                 with Stopwatch() as sw:
                     scaled: dict[tuple[int, int], Image] = {}
