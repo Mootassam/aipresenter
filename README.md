@@ -11,7 +11,8 @@ Two run modes:
 - **Cloud (bring your own GPU)**: the app rents a GPU on *your* RunPod account, streams through
   it, and always shuts it down at the end.
 
-> Status: **Phase 0 (project setup) done.** See [docs/PLAN.md](docs/PLAN.md) for the roadmap and
+> Status: **Phase 1 (tracking + virtual camera) done.** How to run it: [docs/PHASE1.md](docs/PHASE1.md).
+> See [docs/PLAN.md](docs/PLAN.md) for the roadmap and
 > [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how the parts fit together.
 
 ## Repository layout

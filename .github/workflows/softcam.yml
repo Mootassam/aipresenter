@@ -1,0 +1,23 @@
+name: Build softcam
+
+# Builds the softcam virtual camera DLL on a GitHub Windows runner (which has MSVC),
+# so developers don't need Visual Studio installed. Download it from the run's artifacts.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: softcam git tag
+        default: v1.8.1
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        shell: pwsh
+        run: ./tools/build_softcam.ps1 -Version "${{ inputs.version }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: softcam-${{ inputs.version }}
+          path: third_party/softcam/

@@ -83,13 +83,28 @@ class TrackingConfig(_Section):
     pose: bool = True
     hands: bool = True
     max_hands: int = Field(2, ge=0, le=2)
-    smoothing: OneEuroConfig = OneEuroConfig()
-    hand_smoothing: OneEuroConfig = OneEuroConfig(min_cutoff=1.5, beta=0.1)
+    pose_model: Literal["lite", "full", "heavy"] = "full"
+    min_confidence: float = Field(0.5, ge=0.05, le=0.95)
+    max_input_side: int = Field(960, ge=256)
+    """Frames are downscaled to this before tracking. The models run at <=256 px internally,
+    so bigger inputs only cost colour conversion and copy time."""
+    mirror_input: bool = False
+    """True if the camera image is already mirrored (selfie view)."""
+    parallel: bool = True
+    """Run face / pose / hands models in parallel threads."""
+    smoothing: OneEuroConfig = OneEuroConfig(min_cutoff=1.0, beta=5.0, d_cutoff=1.0)
+    hand_smoothing: OneEuroConfig = OneEuroConfig(min_cutoff=1.5, beta=10.0, d_cutoff=1.0)
     """Fingers move fast; they get less smoothing so gestures don't lag."""
+    blendshape_smoothing: OneEuroConfig = OneEuroConfig(min_cutoff=3.0, beta=1.0, d_cutoff=1.0)
+    """Expressions (blinks!) must react fast, so only light smoothing."""
 
 
 class OutputConfig(_Section):
     virtual_camera: bool = True
+    softcam_dll: Path | None = None
+    """Override path to softcam.dll (default: <data_dir>/bin, then third_party/softcam)."""
+    preview: bool = True
+    """Show a local preview window (dev tool; the desktop app has its own preview)."""
     virtual_mic: bool = True
     ai_label: bool = True
     """Show a small "AI-generated" label on the output (platform disclosure rules)."""

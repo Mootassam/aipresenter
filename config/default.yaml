@@ -33,11 +33,20 @@ tracking:
   pose: true
   hands: true
   max_hands: 2
-  smoothing:      { min_cutoff: 1.0, beta: 0.05, d_cutoff: 1.0 }
-  hand_smoothing: { min_cutoff: 1.5, beta: 0.1,  d_cutoff: 1.0 }
+  pose_model: full     # lite | full | heavy
+  min_confidence: 0.5
+  max_input_side: 960  # downscale before tracking (models run at <=256 px internally)
+  mirror_input: false  # true if the camera image is already mirrored
+  parallel: true       # face / pose / hands models in parallel threads
+  # One Euro smoothing: lower min_cutoff = smoother, higher beta = less lag on fast moves
+  smoothing:            { min_cutoff: 1.0, beta: 5.0,  d_cutoff: 1.0 }
+  hand_smoothing:       { min_cutoff: 1.5, beta: 10.0, d_cutoff: 1.0 }
+  blendshape_smoothing: { min_cutoff: 3.0, beta: 1.0,  d_cutoff: 1.0 }
 
 output:
   virtual_camera: true
+  softcam_dll: null    # default: %LOCALAPPDATA%\AIPresenter\bin\softcam.dll
+  preview: true        # dev preview window
   virtual_mic: true
   ai_label: true
   background_path: null

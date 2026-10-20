@@ -1,0 +1,219 @@
+"""Developer command line: ``aip <command>``.
+
+  aip doctor            hardware check + recommended run mode
+  aip config show       print the fully resolved config (YAML + env vars)
+  aip config validate   validate one or more YAML files
+  aip paths             show and create the data directories
+  aip models download   download + verify model files
+  aip track             Phase 1: camera/file -> tracking -> overlay -> preview / virtual camera
+
+Engine imports happen inside the commands so ``doctor`` etc. work without the heavy extras.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+
+import yaml
+from pydantic import ValidationError
+
+from common import __version__
+from common.config import Settings, default_config_files, load_settings
+from common.system_info import system_report
+
+
+def _load(args: argparse.Namespace) -> Settings:
+    files = [Path(p) for p in args.config] if args.config else default_config_files()
+    return load_settings(files, missing_ok=not args.config)
+
+
+def cmd_doctor(_: argparse.Namespace) -> int:
+    rep = system_report()
+    print(f"AI Presenter {__version__}")
+    print(f"Python  : {rep['python']}")
+    print(f"OS      : {rep['os']}")
+    print(f"CPU     : {rep['cpu']}")
+    if not rep["gpus"]:
+        print("GPU     : none detected")
+    for g in rep["gpus"]:
+        cc = ".".join(map(str, g["compute_cap"])) if g["compute_cap"] else "?"
+        print(
+            f"GPU {g['index']}   : {g['name']}  {g['vram_total_mb']} MB  "
+            f"driver {g['driver']}  compute {cc}"
+        )
+    print(f"Mode    : {rep['recommended_mode'].upper()} - {rep['reason']}")
+    return 0
+
+
+def cmd_config_show(args: argparse.Namespace) -> int:
+    data = json.loads(_load(args).model_dump_json())
+    print(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), end="")
+    return 0
+
+
+def cmd_config_validate(args: argparse.Namespace) -> int:
+    try:
+        load_settings([Path(p) for p in args.files], missing_ok=False)
+    except (ValidationError, ValueError, FileNotFoundError) as e:
+        print(f"INVALID:\n{e}", file=sys.stderr)
+        return 1
+    print("OK")
+    return 0
+
+
+def cmd_paths(args: argparse.Namespace) -> int:
+    paths = _load(args).paths.ensure()
+    print(f"root        {paths.root}")
+    for d in paths.all_dirs():
+        print(f"{d.name:<11} {d}")
+    return 0
+
+
+def cmd_models_download(args: argparse.Namespace) -> int:
+    from engine.models import MODELS, ensure_model
+
+    names = args.names or list(MODELS)
+    models_dir = _load(args).paths.models
+    for name in names:
+        path = ensure_model(name, models_dir)
+        print(f"OK  {name:<24} {path}")
+    return 0
+
+
+def _parse_size(text: str) -> tuple[int, int]:
+    w, _, h = text.lower().partition("x")
+    try:
+        return int(w), int(h)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"size must look like 1280x720, got {text!r}") from None
+
+
+def cmd_track(args: argparse.Namespace) -> int:
+    import logging
+
+    from common.log import setup_logging
+    from engine.avatar.debug_overlay import DebugOverlayRenderer
+    from engine.io.frames import open_source
+    from engine.output.video import (
+        NullSink,
+        PreviewWindow,
+        SoftcamNotAvailable,
+        SoftcamSink,
+        VideoSink,
+        find_softcam_dll,
+    )
+    from engine.pipeline import VideoPipeline
+    from engine.tracking.mediapipe_tracker import MediaPipeTracker
+
+    s = _load(args)
+    if args.file:
+        s.video = s.video.model_copy(update={"source": "file", "file_path": Path(args.file)})
+    if args.camera is not None:
+        s.video = s.video.model_copy(update={"source": "camera", "camera_index": args.camera})
+    if args.pose_model:
+        s.tracking.pose_model = args.pose_model
+    if args.sequential:
+        s.tracking.parallel = False
+    out_w, out_h = args.output_size or (s.video.output_width, s.video.output_height)
+    setup_logging(s.logging, s.paths.logs, "track")
+    log = logging.getLogger("aip.track")
+
+    sinks: list[VideoSink] = []
+    if s.output.preview and not args.no_preview:
+        sinks.append(PreviewWindow(out_w, out_h))
+    if s.output.virtual_camera and not args.no_vcam:
+        dll = find_softcam_dll(s.output.softcam_dll, s.data_dir)
+        if dll is None:
+            log.warning("softcam.dll not found: virtual camera disabled (see docs/PHASE1.md)")
+        else:
+            try:
+                sinks.append(SoftcamSink(dll, out_w, out_h, s.video.fps))
+            except (SoftcamNotAvailable, OSError) as e:
+                log.warning("virtual camera disabled: %s", e)
+    if not sinks:
+        sinks.append(NullSink(out_w, out_h))
+
+    source = open_source(s.video, realtime=not args.fast)
+    tracker = MediaPipeTracker(s.tracking, s.paths.models)
+    pipeline = VideoPipeline(source, tracker, DebugOverlayRenderer(), sinks, hud=not args.no_hud)
+    try:
+        report = pipeline.run(
+            duration_s=args.duration,
+            on_stats=lambda r: log.info(
+                "%.1f fps | latency p50 %.0f p95 %.0f ms | rss %.0f MB",
+                r.fps,
+                r.latency_ms.p50,
+                r.latency_ms.p95,
+                r.rss_peak_mb,
+            ),
+        )
+    except KeyboardInterrupt:
+        return 130
+    finally:
+        tracker.close()
+        for sink in sinks:
+            sink.close()
+
+    print(report.pretty())
+    if args.report:
+        Path(args.report).write_text(json.dumps(report.to_dict(), indent=2), encoding="utf-8")
+        print(f"report written to {args.report}")
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="aip", description="AI Presenter developer tools")
+    p.add_argument("--version", action="version", version=__version__)
+    p.add_argument(
+        "-c", "--config", action="append", metavar="FILE", help="YAML config file (repeatable)"
+    )
+    sub = p.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("doctor", help="check hardware").set_defaults(func=cmd_doctor)
+    sub.add_parser("paths", help="show/create data dirs").set_defaults(func=cmd_paths)
+
+    cfg = sub.add_parser("config", help="config tools")
+    cfg_sub = cfg.add_subparsers(dest="config_cmd", required=True)
+    cfg_sub.add_parser("show", help="print resolved config").set_defaults(func=cmd_config_show)
+    val = cfg_sub.add_parser("validate", help="validate YAML files")
+    val.add_argument("files", nargs="+")
+    val.set_defaults(func=cmd_config_validate)
+
+    models = sub.add_parser("models", help="model files")
+    models_sub = models.add_subparsers(dest="models_cmd", required=True)
+    dl = models_sub.add_parser("download", help="download + verify models")
+    dl.add_argument("names", nargs="*", help="model names (default: all)")
+    dl.set_defaults(func=cmd_models_download)
+
+    tr = sub.add_parser("track", help="run tracking with debug overlay")
+    src = tr.add_mutually_exclusive_group()
+    src.add_argument("--file", help="video file as input (mock camera)")
+    src.add_argument("--camera", type=int, help="webcam index")
+    tr.add_argument("--duration", type=float, help="stop after N seconds")
+    tr.add_argument("--fast", action="store_true", help="file input as fast as possible")
+    tr.add_argument("--no-preview", action="store_true")
+    tr.add_argument("--no-vcam", action="store_true", help="don't start the virtual camera")
+    tr.add_argument("--no-hud", action="store_true")
+    tr.add_argument("--output-size", type=_parse_size, metavar="WxH")
+    tr.add_argument("--pose-model", choices=["lite", "full", "heavy"])
+    tr.add_argument("--sequential", action="store_true", help="run models one after another")
+    tr.add_argument("--report", metavar="JSON", help="write the final report to a file")
+    tr.set_defaults(func=cmd_track)
+    return p
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        return int(args.func(args))
+    except ValidationError as e:
+        print(f"Config error:\n{e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

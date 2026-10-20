@@ -26,6 +26,9 @@ data/
 .env
 config/local.yaml
 
+# Built binaries (see tools/build_softcam.ps1)
+third_party/softcam/
+
 # Media used for mock input
 samples/*.mp4
 samples/*.wav

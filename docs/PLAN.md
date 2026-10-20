@@ -69,6 +69,9 @@ Legend: ✅ OK · ⚠️ OK with conditions · ❌ blocks commercial use, must a
 | ONNX Runtime | MIT | ✅ | — |
 | TensorRT / CUDA runtime | NVIDIA SLA (redistribution allowed for listed files) | ⚠️ | Ship only the redistributable DLLs; keep NOTICE files. |
 | sounddevice / PortAudio | MIT | ✅ | — |
+| opencv-contrib-python (pulled in by MediaPipe) | Apache-2.0 (pip wheels exclude the "non-free" modules) | ✅ | — |
+| psutil | BSD-3 | ✅ | — |
+| softcam (virtual camera DLL) v1.8.1 | MIT | ✅ | Keep LICENSE.softcam.txt next to the DLL in the installer. |
 | pyvirtualcam | GPL-2.0 | ❌ | Replace with softcam (MIT) or our own filter. |
 | OBS Virtual Camera | GPL-2.0 (separate program) | ⚠️ | OK to *use* as a separately installed program; don't bundle or link. |
 | VB-Audio Virtual Cable | Donationware; commercial bundling needs a license | ⚠️ | The user installs it, or we buy a license from VB-Audio. |

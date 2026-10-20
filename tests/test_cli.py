@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from common.cli import main
+from aip.cli import main
 
 REPO = Path(__file__).resolve().parent.parent
 
