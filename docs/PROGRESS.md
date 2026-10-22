@@ -67,6 +67,8 @@ Last updated: 2026-10-22
 
 ## Decisions already made (don't re-ask)
 
+- **Voice (Phase 2) is done LAST** (owner, 2026-10-22). Order: finish Phase 3, then 4, 5, 6, 7, 8, 9, then 2.
+
 - The owner wants the **complete product at the best quality**, all phases through the .exe
   installer. Priorities: avatar quality (hands, expressions, stable identity), then low delay.
 - **Commercial-use licenses only.** Banned: InsightFace, pyvirtualcam, CodeFormer, FLUX.1-dev,
