@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from engine.avatar.debug_overlay import DebugOverlayRenderer
-from engine.io.frames import Frame, FrameSource
+from engine.io.frames import Frame, FrameSource, Image
 from engine.output.video import NullSink, letterbox
 from engine.pipeline import MemoryTrend, VideoPipeline
 from engine.tracking.types import FaceResult, HandResult, PoseResult, TrackingResult
@@ -78,6 +78,74 @@ def test_slow_tracker_drops_frames_instead_of_queueing() -> None:
     rep = p.run(duration_s=1.5)
     assert rep.dropped_frames > rep.frames
     assert rep.latency_ms.p95 < 80
+
+
+class SlowRenderer(DebugOverlayRenderer):
+    def __init__(self, delay_s: float) -> None:
+        super().__init__()
+        self.delay_s = delay_s
+
+    def render(self, frame: Frame, track: TrackingResult, hud: list[str] | None = None) -> Image:
+        time.sleep(self.delay_s)
+        return super().render(frame, track, hud)
+
+
+class FailingTracker(FakeTracker):
+    def process(self, frame: Frame) -> TrackingResult:
+        raise ValueError("model crashed")
+
+
+def test_overlap_runs_and_reports() -> None:
+    sink = NullSink(320, 180)
+    p = VideoPipeline(
+        SyntheticSource(limit=40), FakeTracker(), DebugOverlayRenderer(), [sink], overlap=True
+    )
+    rep = p.run(duration_s=5)
+    assert rep.frames == sink.frames > 0
+    assert rep.face_detected_pct == 100.0
+    assert {"render", "output", "track_total"} <= rep.stages_ms.keys()
+    assert rep.latency_ms.count == rep.frames
+
+
+def test_overlap_is_faster_when_both_stages_are_slow() -> None:
+    # tracking 30 ms + rendering 30 ms: one after the other ~16 fps, overlapped ~30 fps
+    def run(overlap: bool) -> int:
+        p = VideoPipeline(
+            SyntheticSource(fps=200), FakeTracker(0.03), SlowRenderer(0.03), [NullSink(160, 120)],
+            overlap=overlap,
+        )  # fmt: skip
+        return p.run(duration_s=1.5).frames
+
+    assert run(True) > 1.5 * run(False)
+
+
+def test_overlap_latency_does_not_build_up() -> None:
+    p = VideoPipeline(
+        SyntheticSource(fps=200), FakeTracker(0.02), SlowRenderer(0.04), [NullSink(160, 120)],
+        overlap=True,
+    )  # fmt: skip
+    rep = p.run(duration_s=1.5)
+    assert rep.dropped_frames > rep.frames
+    assert rep.latency_ms.p95 < 150  # ~ track + render + one waiting frame, not growing
+
+
+def test_overlap_reports_tracking_errors() -> None:
+    p = VideoPipeline(
+        SyntheticSource(), FailingTracker(), DebugOverlayRenderer(), [NullSink(8, 8)], overlap=True
+    )
+    with pytest.raises(RuntimeError, match="tracking failed"):
+        p.run(duration_s=5)
+
+
+def test_overlap_stops_at_end_of_file() -> None:
+    p = VideoPipeline(
+        SyntheticSource(limit=15), FakeTracker(), DebugOverlayRenderer(), [NullSink(8, 8)],
+        overlap=True,
+    )  # fmt: skip
+    t = time.monotonic()
+    rep = p.run(duration_s=10)
+    assert 0 < rep.frames <= 15
+    assert time.monotonic() - t < 5
 
 
 def test_max_frames_stop() -> None:

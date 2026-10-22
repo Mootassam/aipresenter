@@ -7,7 +7,7 @@ Per frame (GPU unless noted):
   4. relative motion vs. the neutral calibration frame + stitching
   5. warping module W + generator G -> 512x512 animated face
   6. paste back into the character canvas with a soft mask, optional background swap
-  7. single GPU -> CPU copy of the finished frame
+  7. GPU -> CPU copy of only the face area (the rest of the frame never changes)
 """
 
 from __future__ import annotations
@@ -59,6 +59,9 @@ def _cover_resize(img: Image, w: int, h: int) -> Image:
 
 
 class LivePortraitRenderer:
+    needs = frozenset({"face"})
+    """Tracking this renderer uses: body and hand tracking are switched off to save time."""
+
     def __init__(
         self,
         net: LivePortraitNet,
@@ -120,6 +123,7 @@ class LivePortraitRenderer:
                 bg = np.empty((h, w, 3), np.uint8)
                 bg[:] = _hex_to_bgr(cfg.background_color)[::-1]
             self.bg = torch.from_numpy(bg).to(dev).permute(2, 0, 1)[None].float() / 255
+        self.composer = Composer(self.canvas, self.grid, self.mask, self.alpha, self.bg)
 
         # --- driving side state ---
         self.cropper = DrivingCropper()
@@ -146,16 +150,11 @@ class LivePortraitRenderer:
         self._mark("motion", t0)
 
         if x_d is None:
-            out = self.canvas if self.bg is None else self._swap_bg(self.canvas)
+            img = self.composer.still()
         else:
             face = self.net.warp_decode(self.f_s, self.x_s, x_d)
             self._mark("warp_decode", t0)
-            pasted = F.grid_sample(face, self.grid, align_corners=False, padding_mode="zeros")
-            out = self.mask * pasted + (1 - self.mask) * self.canvas
-            if self.bg is not None:
-                out = self._swap_bg(out)
-
-        img = self._to_bgr_u8(out)
+            img = self.composer.compose(face)
         self._mark("compose", t0)
         if hud:
             _draw_hud(img, hud)
@@ -167,14 +166,6 @@ class LivePortraitRenderer:
         if self.profile and self.net.device.type == "cuda":
             torch.cuda.synchronize(self.net.device)
         self.timings_ms[name] = now_ms() - t0 - sum(self.timings_ms.values())
-
-    def _swap_bg(self, img: torch.Tensor) -> torch.Tensor:
-        assert self.alpha is not None and self.bg is not None
-        return self.alpha * img + (1 - self.alpha) * self.bg
-
-    def _to_bgr_u8(self, img: torch.Tensor) -> Image:
-        u8 = (img[0].flip(0) * 255 + 0.5).clamp_(0, 255).to(torch.uint8).permute(1, 2, 0)
-        return np.ascontiguousarray(u8.cpu().numpy())
 
     def _driving_keypoints(self, frame: Frame, track: TrackingResult) -> torch.Tensor | None:
         import cv2
@@ -244,6 +235,66 @@ class LivePortraitRenderer:
         ease = self.cfg.lost_face_ease_s * 1000
         k = 1.0 if ease <= 0 else min(1.0, (t_ms - self._lost_since) / ease)
         return blend_toward(self._last_xd, self.x_s, k)
+
+
+def _to_bgr_u8(img: torch.Tensor) -> Image:
+    """1x3xHxW RGB float in [0, 1] -> HxWx3 BGR uint8 on the CPU."""
+    u8 = (img[0].flip(0) * 255 + 0.5).clamp_(0, 255).to(torch.uint8).permute(1, 2, 0)
+    return np.ascontiguousarray(u8.cpu().numpy())
+
+
+class Composer:
+    """Pastes the animated 512 face into the character canvas (+ optional background swap).
+
+    Only the face area changes between frames, so it is found once (where the paste mask is
+    above zero) and only that part is computed and copied off the GPU; the rest comes from a
+    ready-made still image. Outside that area the mask is exactly 0, so the result is identical
+    to compositing the whole canvas.
+    """
+
+    def __init__(
+        self,
+        canvas: torch.Tensor,
+        grid: torch.Tensor,
+        mask: torch.Tensor,
+        alpha: torch.Tensor | None = None,
+        bg: torch.Tensor | None = None,
+    ) -> None:
+        self.alpha, self.bg = alpha, bg
+        self._still = _to_bgr_u8(self._swap_bg(canvas, alpha, bg))
+        ys, xs = torch.nonzero(mask[0, 0] > 0, as_tuple=True)
+        if ys.numel() == 0:
+            self.roi = (0, 0, 0, 0)
+        else:
+            self.roi = (int(ys.min()), int(ys.max()) + 1, int(xs.min()), int(xs.max()) + 1)
+        y0, y1, x0, x1 = self.roi
+        self.grid = grid[:, y0:y1, x0:x1]
+        self.mask = mask[..., y0:y1, x0:x1]
+        self.canvas = canvas[..., y0:y1, x0:x1]
+        self.alpha_roi = None if alpha is None else alpha[..., y0:y1, x0:x1]
+        self.bg_roi = None if bg is None else bg[..., y0:y1, x0:x1]
+
+    @staticmethod
+    def _swap_bg(
+        img: torch.Tensor, alpha: torch.Tensor | None, bg: torch.Tensor | None
+    ) -> torch.Tensor:
+        if alpha is None or bg is None:
+            return img
+        return alpha * img + (1 - alpha) * bg
+
+    def still(self) -> Image:
+        """The character without animation (no face tracked yet)."""
+        return self._still.copy()
+
+    def compose(self, face: torch.Tensor) -> Image:
+        """1x3x512x512 animated face (RGB float) -> full BGR uint8 frame."""
+        img = self._still.copy()
+        y0, y1, x0, x1 = self.roi
+        if y1 > y0 and x1 > x0:
+            pasted = F.grid_sample(face, self.grid, align_corners=False, padding_mode="zeros")
+            part = self.mask * pasted + (1 - self.mask) * self.canvas
+            img[y0:y1, x0:x1] = _to_bgr_u8(self._swap_bg(part, self.alpha_roi, self.bg_roi))
+        return img
 
 
 def _draw_hud(img: Image, lines: list[str]) -> None:

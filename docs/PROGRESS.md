@@ -34,6 +34,16 @@ Last updated: 2026-10-22
 - Next speed steps, expected to reach 25-30 fps: (1) track frame N+1 while rendering frame N
   (parallel), (2) FP16/TensorRT for warp_decode + motion, (3) compose on the GPU.
 
+### Speed work 1 (2026-10-22, not measured on a GPU yet)
+- Tracking and rendering now overlap (`video.overlap_stages`, default on; `--no-overlap` to compare):
+  frame N+1 is tracked while frame N renders; hand-over keeps only the newest result.
+- A renderer declares the tracking it needs (`needs`); the LivePortrait avatar only needs the face,
+  so pose + hands are off for now (laptop: tracking 42 -> 18 ms). Phase 4 turns them back on.
+- `Composer`: only the face area is composited and copied off the GPU; tests prove the pixels are
+  identical to the full-canvas version.
+- `tools/runpod_bench.sh`: the torch.compile step is replaced by a 30 s `--no-overlap` comparison.
+- Next: re-run the RunPod bench (expect ~15-20 fps from these), then FP16/TensorRT for the render.
+
 ## Waiting on the owner before Phase 2
 
 1. Install VB-Audio Virtual Cable (vb-audio.com/Cable) and restart the PC.

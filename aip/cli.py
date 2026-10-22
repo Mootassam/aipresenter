@@ -182,6 +182,12 @@ def cmd_track(args: argparse.Namespace) -> int:
     log = logging.getLogger("aip.track")
 
     renderer = _make_renderer(s, profile=args.profile)
+    needs = getattr(renderer, "needs", None)  # None = everything (debug overlay)
+    if needs is not None:
+        s.tracking.pose = s.tracking.pose and "pose" in needs
+        s.tracking.hands = s.tracking.hands and "hands" in needs
+    if args.no_overlap:
+        s.video.overlap_stages = False
 
     def on_key(key: str) -> None:
         if key == "c" and hasattr(renderer, "recalibrate"):
@@ -206,7 +212,9 @@ def cmd_track(args: argparse.Namespace) -> int:
 
     source = open_source(s.video, realtime=not args.fast)
     tracker = MediaPipeTracker(s.tracking, s.paths.models)
-    pipeline = VideoPipeline(source, tracker, renderer, sinks, hud=not args.no_hud)
+    pipeline = VideoPipeline(
+        source, tracker, renderer, sinks, hud=not args.no_hud, overlap=s.video.overlap_stages
+    )
     try:
         report = pipeline.run(
             duration_s=args.duration,
@@ -273,6 +281,9 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--output-size", type=_parse_size, metavar="WxH")
     tr.add_argument("--pose-model", choices=["lite", "full", "heavy"])
     tr.add_argument("--sequential", action="store_true", help="run models one after another")
+    tr.add_argument(
+        "--no-overlap", action="store_true", help="track and render one after another (compare)"
+    )
     tr.add_argument("--report", metavar="JSON", help="write the final report to a file")
     tr.add_argument("--character", metavar="IMAGE", help="animate this character (Phase 3)")
     tr.add_argument("--background", choices=["original", "color", "image"])

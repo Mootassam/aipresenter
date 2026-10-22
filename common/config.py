@@ -42,6 +42,8 @@ class VideoConfig(_Section):
     render_height: int = Field(768, ge=128, multiple_of=8)
     output_width: int = Field(1280, ge=160)
     output_height: int = Field(720, ge=120)
+    overlap_stages: bool = True
+    """Track the next frame while the current one renders (frame rate = slower stage, not sum)."""
 
     @model_validator(mode="after")
     def _file_needs_path(self) -> Self:

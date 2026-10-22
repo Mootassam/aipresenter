@@ -3,6 +3,10 @@
 The loop runs in the calling thread. The source runs in its own thread and always hands over
 the newest frame, so the reported latency is the real capture -> output delay inside the app
 (camera sensor and consumer-side delays come on top and are measured separately).
+
+With ``overlap=True`` tracking runs in a second thread: frame N+1 is tracked while frame N is
+rendered, so the frame rate is set by the slower of the two stages instead of their sum. The
+hand-over between them also keeps only the newest result, so delay can't build up.
 """
 
 from __future__ import annotations
@@ -33,6 +37,35 @@ class Renderer(Protocol):
     def render(
         self, frame: Frame, track: TrackingResult, hud: list[str] | None = None
     ) -> Image: ...
+
+
+class _TrackedSlot:
+    """Newest (frame, tracking) pair from the tracking thread. ``put`` overwrites, never queues."""
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._item: tuple[Frame, TrackingResult] | None = None
+        self.done = False
+        self.error: BaseException | None = None
+        self.dropped = 0
+
+    def put(self, item: tuple[Frame, TrackingResult]) -> None:
+        with self._cond:
+            if self._item is not None:
+                self.dropped += 1  # tracked but never rendered
+            self._item = item
+            self._cond.notify_all()
+
+    def finish(self, error: BaseException | None = None) -> None:
+        with self._cond:
+            self.done, self.error = True, error
+            self._cond.notify_all()
+
+    def get(self, timeout_s: float) -> tuple[Frame, TrackingResult] | None:
+        with self._cond:
+            self._cond.wait_for(lambda: self._item is not None or self.done, timeout_s)
+            item, self._item = self._item, None
+            return item
 
 
 @dataclass
@@ -100,12 +133,15 @@ class VideoPipeline:
         sinks: Sequence[VideoSink],
         *,
         hud: bool = True,
+        overlap: bool = False,
     ) -> None:
         self.source = source
         self.tracker = tracker
         self.renderer = renderer
         self.sinks = list(sinks)
         self.hud = hud
+        self.overlap = overlap
+        self._handoff: _TrackedSlot | None = None
         self.fps = FpsMeter()
         self.latency = LatencyStats(4096)
         self.stages: dict[str, LatencyStats] = {}
@@ -138,7 +174,15 @@ class VideoPipeline:
         next_mem = next_stats = t0 + 1000.0
         frames = with_face = with_hands = 0
 
+        halt = threading.Event()
+        tracking: threading.Thread | None = None
         self.source.start()
+        if self.overlap:
+            self._handoff = _TrackedSlot()
+            tracking = threading.Thread(
+                target=self._track_loop, args=(self._handoff, halt), name="tracking", daemon=True
+            )
+            tracking.start()
         try:
             while True:
                 if stop is not None and stop.is_set():
@@ -150,16 +194,29 @@ class VideoPipeline:
                 if any(getattr(s, "quit_requested", False) for s in self.sinks):
                     break
 
-                frame = self.source.read(timeout_s=2.0)
-                if frame is None:
-                    if self.source.error is not None:
-                        raise RuntimeError("frame source failed") from self.source.error
-                    if self.source.slot.closed:
-                        break  # end of file without loop
-                    log.warning("no frame for 2 s")
-                    continue
-
-                track = self.tracker.process(frame)
+                if self._handoff is not None:
+                    item = self._handoff.get(timeout_s=2.0)
+                    if item is None:
+                        if self._handoff.error is not None:
+                            raise RuntimeError("tracking failed") from self._handoff.error
+                        if self.source.error is not None:
+                            raise RuntimeError("frame source failed") from self.source.error
+                        if self._handoff.done:
+                            break  # end of file without loop
+                        log.warning("no tracked frame for 2 s")
+                        continue
+                    frame, track = item
+                else:
+                    frame_or_none = self.source.read(timeout_s=2.0)
+                    if frame_or_none is None:
+                        if self.source.error is not None:
+                            raise RuntimeError("frame source failed") from self.source.error
+                        if self.source.slot.closed:
+                            break  # end of file without loop
+                        log.warning("no frame for 2 s")
+                        continue
+                    frame = frame_or_none
+                    track = self.tracker.process(frame)
                 for k, v in track.timings_ms.items():
                     self._stage(k, v)
 
@@ -194,8 +251,28 @@ class VideoPipeline:
                     on_stats(self._report(frames, t0, mem, rss_start, with_face, with_hands))
                     next_stats = t_out + stats_every_s * 1000
         finally:
+            halt.set()
             self.source.stop()
+            if tracking is not None:
+                tracking.join(timeout=5)
         return self._report(frames, t0, mem, rss_start, with_face, with_hands)
+
+    def _track_loop(self, slot: _TrackedSlot, halt: threading.Event) -> None:
+        """Tracking thread (overlap mode): newest frame -> tracker -> hand-over to the renderer."""
+        error: BaseException | None = None
+        try:
+            while not halt.is_set():
+                frame = self.source.read(timeout_s=0.5)
+                if frame is None:
+                    if self.source.error is not None or self.source.slot.closed:
+                        break
+                    continue
+                slot.put((frame, self.tracker.process(frame)))
+        except BaseException as e:  # surfaced to the render loop instead of dying silently
+            log.exception("tracking failed")
+            error = e
+        finally:
+            slot.finish(error)
 
     def _report(
         self, frames: int, t0: float, mem: MemoryTrend, rss_start: float, face: int, hands: int
@@ -206,7 +283,7 @@ class VideoPipeline:
             frames=frames,
             duration_s=dur,
             fps=frames / dur if dur > 0 else 0.0,
-            dropped_frames=self.source.dropped,
+            dropped_frames=self.source.dropped + (self._handoff.dropped if self._handoff else 0),
             latency_ms=self.latency.summary(),
             stages_ms={k: v.summary() for k, v in self.stages.items()},
             hands_detected_pct=100.0 * hands / n,

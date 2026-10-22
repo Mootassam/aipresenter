@@ -45,9 +45,9 @@ echo ">>> 2/4 Per-step timings (30 s)"
 uv run aip track "${COMMON[@]}" --fast --profile --duration 30 --report results/profile.json \
   | tee results/profile.txt
 
-echo ">>> 3/4 torch.compile test (90 s, the first ~60 s are warm-up)"
-uv run aip track "${COMMON[@]}" --compile --duration 90 --report results/compile.json \
-  | tee results/compile.txt || echo "compile test failed (not critical)"
+echo ">>> 3/4 Comparison: tracking and rendering one after another (the old way, 30 s)"
+uv run aip track "${COMMON[@]}" --no-overlap --duration 30 --report results/serial.json \
+  | tee results/serial.txt
 
 echo ">>> 4/4 Quality video: every frame of the sample, side by side"
 AIP_VIDEO__LOOP_FILE=false uv run aip track "${COMMON[@]}" --fast --no-hud \
