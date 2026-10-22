@@ -109,6 +109,8 @@ class AvatarConfig(_Section):
     """None = automatic (on for RTX 20xx and newer)."""
     compile: bool = False
     """torch.compile the per-frame networks (needs Triton: Linux / cloud worker)."""
+    cuda_graphs: bool = True
+    """Record the face renderer as a CUDA graph: far less CPU work per frame (GPU only)."""
     canvas_height: int = Field(768, ge=256, le=2160, multiple_of=2)
     """The character is rendered at this height, then scaled to the output size."""
     pose_strength: float = Field(1.0, ge=0.0, le=2.0)

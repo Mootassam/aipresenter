@@ -118,7 +118,11 @@ def _make_renderer(s: Settings, *, profile: bool = False) -> Any:
             raise SystemExit("--bg-image (or output.background_path) is required")
         bg = read_image(s.output.background_path)
     net = LivePortraitNet(
-        s.paths.models, pick_device(s.avatar.device), s.avatar.fp16, compile=s.avatar.compile
+        s.paths.models,
+        pick_device(s.avatar.device),
+        s.avatar.fp16,
+        compile=s.avatar.compile,
+        cuda_graphs=s.avatar.cuda_graphs,
     )
     return LivePortraitRenderer(net, char, s.avatar, background=bg, profile=profile)
 
@@ -177,6 +181,8 @@ def cmd_track(args: argparse.Namespace) -> int:
         s.avatar.device = "cpu"
     if args.compile:
         s.avatar.compile = True
+    if args.no_cuda_graphs:
+        s.avatar.cuda_graphs = False
     out_w, out_h = args.output_size or (s.video.output_width, s.video.output_height)
     setup_logging(s.logging, s.paths.logs, "track")
     log = logging.getLogger("aip.track")
@@ -281,6 +287,7 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--output-size", type=_parse_size, metavar="WxH")
     tr.add_argument("--pose-model", choices=["lite", "full", "heavy"])
     tr.add_argument("--sequential", action="store_true", help="run models one after another")
+    tr.add_argument("--no-cuda-graphs", action="store_true", help="compare: no CUDA graph")
     tr.add_argument(
         "--no-overlap", action="store_true", help="track and render one after another (compare)"
     )

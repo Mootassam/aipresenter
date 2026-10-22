@@ -9,7 +9,7 @@ Last updated: 2026-10-22
 | 0 Project setup | ✅ done (commit 50c435d) |
 | 1 Tracking + virtual camera | ✅ done (commit b43ab8e). softcam DLL not built yet (no compiler on the laptop) |
 | 2 Voice changer | ⏳ waiting on the owner (see below) |
-| 3 Avatar v1 (head + shoulders) | 🔨 part 1 done on branch `phase3-avatar` (commit 7923553): LivePortrait engine works (checked on CPU). GPU speed test done on RunPod 2026-10-22 (10.3 fps, see below). Next: run tracking and rendering in parallel, TensorRT/FP16 for the render, identity stability, lip-sync hook, better matting |
+| 3 Avatar v1 (head + shoulders) | 🔨 on branch `phase3-avatar`: LivePortrait engine works; **27 fps on an RTX 4090** (2026-10-22, see below). Next: identity stability, lip-sync hook, better matting, then check speed on an 8 GB card (RTX 5050 class) |
 | 4–9 | not started |
 
 ## Phase 3 notes
@@ -42,7 +42,18 @@ Last updated: 2026-10-22
 - `Composer`: only the face area is composited and copied off the GPU; tests prove the pixels are
   identical to the full-canvas version.
 - `tools/runpod_bench.sh`: the torch.compile step is replaced by a 30 s `--no-overlap` comparison.
-- Next: re-run the RunPod bench (expect ~15-20 fps from these), then FP16/TensorRT for the render.
+- RunPod re-run: overlap alone was SLOWER (12.3 vs 13.0 fps serial): the render launches thousands
+  of small GPU kernels per frame, so its CPU work fought the tracking thread for Python's GIL.
+
+### Speed work 2: CUDA graph (2026-10-22, RTX 4090)
+- `LivePortraitNet.warp_decode` records warping + generator as one CUDA graph (`avatar.cuda_graphs`,
+  default on; `--no-cuda-graphs` to compare). Falls back to normal mode if recording fails.
+  Two vendored helpers now create their tensors on the GPU (no CPU->GPU copy, needed for recording).
+- Same output: max pixel difference 0.000 vs normal mode (`tests/test_lp_cuda_graph.py`, GPU test).
+- **Result: 27.2 fps, delay p50 71 ms / p95 89 ms** with overlap (17.7 fps without overlap). The
+  file source is 30 fps, so this is close to every frame. Results: `results/runpod-2026-10-22c/`.
+- Per frame now: tracking ~20 ms (CPU) in parallel with render ~34 ms (motion 12 + GPU work ~22).
+- TensorRT is not needed for the 4090. Still to check: an 8 GB RTX 5050-class card.
 
 ## Waiting on the owner before Phase 2
 

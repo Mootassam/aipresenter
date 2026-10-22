@@ -76,6 +76,7 @@ class LivePortraitNet:
         fp16: bool | None = None,
         *,
         compile: bool = False,
+        cuda_graphs: bool = True,
     ) -> None:
         from engine.avatar.liveportrait.modules.appearance_feature_extractor import (
             AppearanceFeatureExtractor,
@@ -89,6 +90,8 @@ class LivePortraitNet:
 
         self.device = device or pick_device()
         self.fp16 = supports_fast_fp16(self.device) if fp16 is None else fp16
+        self.cuda_graphs = cuda_graphs and self.device.type == "cuda" and not compile
+        self._warp_graph: _Graphed | None = None
         # Weights stay fp32; fp16 runs through autocast like upstream LivePortrait, which keeps
         # precision-sensitive ops (softmax, gaussian heatmaps, grid_sample) in fp32.
         self.dtype = torch.float32
@@ -185,8 +188,57 @@ class LivePortraitNet:
     def warp_decode(
         self, feature: torch.Tensor, x_s: torch.Tensor, x_d: torch.Tensor
     ) -> torch.Tensor:
-        """Returns the animated face crop (1, 3, 512, 512), float32 in [0, 1]."""
-        with self._amp():
+        """Returns the animated face crop (1, 3, 512, 512), float32 in [0, 1].
+
+        On CUDA the networks run as a recorded CUDA graph: one launch per frame instead of
+        thousands of small kernel launches, which otherwise keep the CPU (and the GIL) busy.
+        The returned tensor is reused by the next call: use it before calling again.
+        """
+        if self.cuda_graphs:
+            key = (feature.data_ptr(), x_s.data_ptr(), tuple(x_d.shape))
+            if self._warp_graph is None or self._warp_graph.key != key:
+                try:
+                    self._warp_graph = _Graphed(
+                        lambda d: self._warp_decode(feature, x_s, d), x_d, key
+                    )
+                except RuntimeError:
+                    log.warning("CUDA graph capture failed; running without", exc_info=True)
+                    self.cuda_graphs = False
+                    self._warp_graph = None
+            if self._warp_graph is not None:
+                return self._warp_graph(x_d)
+        return self._warp_decode(feature, x_s, x_d)
+
+    def _warp_decode(
+        self, feature: torch.Tensor, x_s: torch.Tensor, x_d: torch.Tensor
+    ) -> torch.Tensor:
+        # cache off: autocast's weight cache doesn't work inside a recorded CUDA graph
+        with torch.autocast(
+            self.device.type, dtype=torch.float16, enabled=self.fp16, cache_enabled=False
+        ):
             warped = self.W(feature, kp_source=x_s, kp_driving=x_d)
             out = self.G(feature=warped["out"])
         return out.float().clamp_(0, 1)
+
+
+class _Graphed:
+    """``fn(x)`` recorded once as a CUDA graph; each call copies x in and replays it."""
+
+    def __init__(self, fn: Any, example: torch.Tensor, key: Any) -> None:
+        self.key = key
+        self.x = example.clone()
+        side = torch.cuda.Stream()  # type: ignore[no-untyped-call]
+        side.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(side):  # warm-up: cuDNN picks its kernels before recording
+            for _ in range(3):
+                fn(self.x)
+        torch.cuda.current_stream().wait_stream(side)
+        self.graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(self.graph):
+            self.out: torch.Tensor = fn(self.x)
+        log.info("CUDA graph recorded")
+
+    def __call__(self, x: torch.Tensor) -> torch.Tensor:
+        self.x.copy_(x)
+        self.graph.replay()
+        return self.out

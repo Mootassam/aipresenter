@@ -40,9 +40,10 @@ def kp2gaussian(kp, spatial_size, kp_variance):
 
 def make_coordinate_grid(spatial_size, ref, **kwargs):
     d, h, w = spatial_size
-    x = torch.arange(w).type(ref.dtype).to(ref.device)
-    y = torch.arange(h).type(ref.dtype).to(ref.device)
-    z = torch.arange(d).type(ref.dtype).to(ref.device)
+    # created directly on the GPU (upstream copied from the CPU, which a CUDA graph can't record)
+    x = torch.arange(w, device=ref.device).type(ref.dtype)
+    y = torch.arange(h, device=ref.device).type(ref.dtype)
+    z = torch.arange(d, device=ref.device).type(ref.dtype)
 
     # NOTE: must be right-down-in
     x = (2 * (x / (w - 1)) - 1)  # the x axis faces to the right
