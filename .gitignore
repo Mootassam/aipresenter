@@ -38,3 +38,7 @@ samples/*.wav
 Thumbs.db
 .vscode/
 .idea/
+
+# Benchmark output (videos, reports): kept locally, summarized in docs/PROGRESS.md
+results/
+results.tgz

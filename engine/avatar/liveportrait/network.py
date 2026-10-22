@@ -24,12 +24,30 @@ log = logging.getLogger(__name__)
 _CONFIG = Path(__file__).with_name("models.yaml")
 
 
+def build_runs_on(major: int, minor: int, arch_list: list[str]) -> bool:
+    """Can a PyTorch build compiled for `arch_list` run on a GPU of compute capability major.minor?
+
+    CUDA binaries run on any GPU of the same major version with an equal or higher minor
+    (sm_86 code runs on an RTX 4090, sm_89), and PTX (compute_XY) is JIT-compiled for any newer GPU.
+    """
+    for arch in arch_list:
+        kind, _, num = arch.partition("_")
+        if not num.isdigit() or len(num) < 2:
+            continue
+        a_major, a_minor = int(num[:-1]), int(num[-1])
+        if kind == "sm" and a_major == major and a_minor <= minor:
+            return True
+        if kind == "compute" and (a_major, a_minor) <= (major, minor):
+            return True
+    return False
+
+
 def pick_device(prefer: str = "cuda") -> torch.device:
     """The requested CUDA device if this PyTorch build supports it, else the CPU."""
     if prefer.startswith("cuda") and torch.cuda.is_available():
         dev = torch.device(prefer)
         major, minor = torch.cuda.get_device_capability(dev)
-        if f"sm_{major}{minor}" in torch.cuda.get_arch_list():
+        if build_runs_on(major, minor, torch.cuda.get_arch_list()):
             return dev
         log.warning(
             "%s (sm_%d%d) is not supported by this PyTorch build; using the CPU",
@@ -85,7 +103,9 @@ class LivePortraitNet:
             "lp_appearance_feature_extractor",
             AppearanceFeatureExtractor(**params["appearance_feature_extractor_params"]),
         )
-        self.M: Any = load("lp_motion_extractor", MotionExtractor(**params["motion_extractor_params"]))
+        self.M: Any = load(
+            "lp_motion_extractor", MotionExtractor(**params["motion_extractor_params"])
+        )
         self.W: Any = load("lp_warping_module", WarpingNetwork(**params["warping_module_params"]))
         self.G: Any = load("lp_spade_generator", SPADEDecoder(**params["spade_generator_params"]))
 

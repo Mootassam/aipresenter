@@ -1,6 +1,6 @@
 # Progress log (read this first when resuming)
 
-Last updated: 2026-10-20
+Last updated: 2026-10-22
 
 ## Where we are
 
@@ -9,7 +9,7 @@ Last updated: 2026-10-20
 | 0 Project setup | ✅ done (commit 50c435d) |
 | 1 Tracking + virtual camera | ✅ done (commit b43ab8e). softcam DLL not built yet (no compiler on the laptop) |
 | 2 Voice changer | ⏳ waiting on the owner (see below) |
-| 3 Avatar v1 (head + shoulders) | 🔨 part 1 done on branch `phase3-avatar` (commit 7923553): LivePortrait engine works (checked on CPU). Next: GPU speed test on RunPod (`tools/runpod_bench.sh`), then TensorRT, lip-sync hook, better matting |
+| 3 Avatar v1 (head + shoulders) | 🔨 part 1 done on branch `phase3-avatar` (commit 7923553): LivePortrait engine works (checked on CPU). GPU speed test done on RunPod 2026-10-22 (10.3 fps, see below). Next: run tracking and rendering in parallel, TensorRT/FP16 for the render, identity stability, lip-sync hook, better matting |
 | 4–9 | not started |
 
 ## Phase 3 notes
@@ -17,6 +17,22 @@ Last updated: 2026-10-20
 - SSH key for RunPod: `~/.ssh/aip_runpod` (the owner pastes the .pub into RunPod → Settings → SSH Public Keys).
 - RunPod test: the owner deploys an RTX 4090 pod and gives Claude the SSH command; Claude copies the code + samples and runs `bash tools/runpod_bench.sh 60` (self-stop after 60 min). Then make sure the pod is TERMINATED.
 - `samples/character.png` (1330×1182) passes the quality check; one tip: the hair touches the top edge.
+
+### RunPod RTX 4090 speed test (2026-10-22, results in `results/runpod-2026-10-22/`, not in git)
+- Bug found and fixed: `pick_device` refused the 4090 (sm_89) because the cu128 build lists sm_86, not
+  sm_89, so the avatar ran on the CPU (0.1 fps). Fix: `build_runs_on()` (same major + lower minor, or
+  PTX) with tests. This matters for the owner's RTX 5050 too.
+- The pod image also needed `libegl1 libgles2` for MediaPipe (added to `tools/runpod_bench.sh`).
+- Real-time result: **10.3 fps, delay p50 110 ms / p95 139 ms**, face found 100%, GPU memory only
+  ~1.1 GB (peak 1.8 GB on the card) -> it will fit an 8 GB card easily.
+- Per frame: tracking ~42 ms (MediaPipe on the pod's CPU) + render ~52 ms (motion 17, warp_decode 25,
+  compose 10). They run one after the other, so ~95 ms -> ~10 fps.
+- `--compile` (torch.compile) is NOT usable: Triton hits the 4090's shared-memory limit and the first
+  frame took 3 minutes. Drop it; use TensorRT/FP16 instead.
+- Quality (avatar.mp4): natural expressions and mouth, sharp face; the face shape drifts a little
+  between frames (identity stability to improve).
+- Next speed steps, expected to reach 25-30 fps: (1) track frame N+1 while rendering frame N
+  (parallel), (2) FP16/TensorRT for warp_decode + motion, (3) compose on the GPU.
 
 ## Waiting on the owner before Phase 2
 

@@ -16,7 +16,7 @@ if [[ -n "${RUNPOD_POD_ID:-}" ]]; then
 fi
 
 echo ">>> Installing system libraries"
-apt-get update -qq && apt-get install -y -qq libgl1 libglib2.0-0 >/dev/null
+apt-get update -qq && apt-get install -y -qq libgl1 libglib2.0-0 libegl1 libgles2 >/dev/null
 
 if ! command -v uv >/dev/null; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
