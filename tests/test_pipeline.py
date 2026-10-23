@@ -176,3 +176,56 @@ def test_memory_trend_slope() -> None:
         m.add(float(t), 100.0 + t / 60.0)  # +1 MB per minute
     assert m.slope_mb_per_min == pytest.approx(1.0, abs=0.01)
     assert m.peak_mb == pytest.approx(100 + 59 / 60)
+
+
+class LosslessSource(SyntheticSource):
+    """Like a file decoded with ``realtime=False``: the next frame waits until this one is taken."""
+
+    realtime = False
+
+    def _run(self) -> None:
+        n = 0
+        while not self._stop.is_set() and (self.limit is None or n < self.limit):
+            while self.slot.has_frame and not self._stop.is_set():
+                time.sleep(0.0005)
+            self._publish(np.full((120, 160, 3), n % 255, np.uint8))
+            n += 1
+
+
+class IndexSink(NullSink):
+    def __init__(self) -> None:
+        super().__init__(160, 120)
+        self.indices: list[int] = []
+
+
+class IndexRenderer(SlowRenderer):
+    def __init__(self, delay_s: float, sink: IndexSink) -> None:
+        super().__init__(delay_s)
+        self.sink = sink
+
+    def render(self, frame: Frame, track: TrackingResult, hud: list[str] | None = None) -> Image:
+        self.sink.indices.append(frame.index)
+        return super().render(frame, track, hud)
+
+
+def test_overlap_keeps_every_frame_of_a_file_decoded_as_fast_as_possible() -> None:
+    """Recording a file must not skip frames, or its sound no longer matches the picture."""
+    sink = IndexSink()
+    p = VideoPipeline(
+        LosslessSource(limit=30), FakeTracker(0.005), IndexRenderer(0.02, sink), [sink],
+        overlap=True,
+    )  # fmt: skip
+    rep = p.run(duration_s=10)
+    assert sink.indices == list(range(30))
+    assert rep.dropped_frames == 0
+
+
+def test_lossless_overlap_stops_on_time() -> None:
+    sink = IndexSink()
+    p = VideoPipeline(
+        LosslessSource(), FakeTracker(), IndexRenderer(0.01, sink), [sink], overlap=True
+    )
+    t = time.monotonic()
+    p.run(duration_s=0.5)
+    assert time.monotonic() - t < 3
+    assert sink.indices == list(range(len(sink.indices)))

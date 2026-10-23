@@ -76,7 +76,16 @@ Last updated: 2026-10-22
 - Try it: `uv run aip track --file samples	alk.mp4 --character samples\character.png --lip-sync`
   (`--lip-strength 1` = voice only). Check single frames: `tools/render_frames.py ... --mouth 1.0`.
 - CPU check: voice 1.0 opens a closed mouth naturally (teeth visible); silence half-closes an
-  open one. Not yet watched as a moving video with sound (needs the GPU pod).
+  open one.
+- RunPod RTX 4090 (2026-10-22, `results/runpod-2026-10-22d/`, not in git): lip-sync costs ~1 ms
+  (27.0 vs 28.0 fps real time). How well the avatar's lips follow the voice (correlation of lip
+  opening with voice loudness, all 1800 frames): off 0.13, strength 0.6 -> 0.48, strength 1.0 ->
+  0.64. Lips trail the voice by ~50 ms (smoothing); fine live, where the voice engine adds delay.
+  `compare_lipsync.mp4` (driver | off | 0.6 | 1.0, with sound) and `compare_bg.mp4` (green
+  background, clean edges while the head moves) are for the owner to watch.
+- Bug fixed: recording a file with overlap on (`--fast --record`) skipped about half the frames,
+  so recorded videos were shorter than their sound. The hand-over now waits instead of dropping
+  when the source is a file decoded as fast as possible (`_TrackedSlot(lossless=True)`).
 - Finding: in `samples/talk.mp4` the lips follow the sound only weakly (correlation ~0.2, broad
   peak at +300 ms), so it is a poor clip for tuning timing. A clip of the owner talking into
   their webcam would be better.

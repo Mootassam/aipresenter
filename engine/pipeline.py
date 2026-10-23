@@ -40,9 +40,14 @@ class Renderer(Protocol):
 
 
 class _TrackedSlot:
-    """Newest (frame, tracking) pair from the tracking thread. ``put`` overwrites, never queues."""
+    """Newest (frame, tracking) pair from the tracking thread. ``put`` overwrites, never queues.
 
-    def __init__(self) -> None:
+    With ``lossless=True`` (a file decoded as fast as possible, e.g. for recording) ``put``
+    waits until the renderer took the previous pair instead, so every frame gets rendered.
+    """
+
+    def __init__(self, lossless: bool = False) -> None:
+        self.lossless = lossless
         self._cond = threading.Condition()
         self._item: tuple[Frame, TrackingResult] | None = None
         self.done = False
@@ -51,6 +56,8 @@ class _TrackedSlot:
 
     def put(self, item: tuple[Frame, TrackingResult]) -> None:
         with self._cond:
+            if self.lossless:
+                self._cond.wait_for(lambda: self._item is None or self.done)
             if self._item is not None:
                 self.dropped += 1  # tracked but never rendered
             self._item = item
@@ -65,6 +72,7 @@ class _TrackedSlot:
         with self._cond:
             self._cond.wait_for(lambda: self._item is not None or self.done, timeout_s)
             item, self._item = self._item, None
+            self._cond.notify_all()
             return item
 
 
@@ -178,7 +186,7 @@ class VideoPipeline:
         tracking: threading.Thread | None = None
         self.source.start()
         if self.overlap:
-            self._handoff = _TrackedSlot()
+            self._handoff = _TrackedSlot(lossless=getattr(self.source, "realtime", True) is False)
             tracking = threading.Thread(
                 target=self._track_loop, args=(self._handoff, halt), name="tracking", daemon=True
             )
@@ -252,6 +260,8 @@ class VideoPipeline:
                     next_stats = t_out + stats_every_s * 1000
         finally:
             halt.set()
+            if self._handoff is not None:
+                self._handoff.finish()  # releases a tracking thread waiting in a lossless put
             self.source.stop()
             if tracking is not None:
                 tracking.join(timeout=5)
