@@ -90,6 +90,21 @@ Last updated: 2026-10-22
   peak at +300 ms), so it is a poor clip for tuning timing. A clip of the owner talking into
   their webcam would be better.
 
+### Identity stability check (2026-10-22, RTX 4090, `results/runpod-2026-10-22e/`, not in git)
+- At rest the render matches the still within 1-2% (nose -2%): the generator itself keeps the face.
+- `identity_metrics.py --driver` compares the avatar's shape change with the driver's frame by
+  frame. Most of the measured change is the avatar copying the user's expressions and head tilt
+  (eye-to-mouth follows the driver at 0.87-0.91). Fixed offsets while talking: eye-to-mouth +9%
+  (the character's resting smile disappears: the driver's calibration frame was smiling),
+  nose -4.5%.
+- Tried an "identity lock" (hold back the expression change on LivePortrait's outline keypoints
+  0,3,4,5,7,8,9,10, as in its expression-friendly mode): average spread 3.34% -> 3.16%, own
+  drift 2.69% -> 2.76%, no visible difference in the side-by-side video. **Removed** (no value).
+  `expression_strength` 0.8: spread 2.89%, but only because she moves less.
+- Seen in the videos and worth fixing next instead: strong brow raises put forehead wrinkles on
+  the character (looks older); the resting smile is lost; the face is softer than the still.
+- This pod: real time 29.7 fps (the source's own 30 fps), delay p50 36 ms / p95 38 ms.
+
 ## Waiting on the owner before Phase 2
 
 1. Install VB-Audio Virtual Cable (vb-audio.com/Cable) and restart the PC.
