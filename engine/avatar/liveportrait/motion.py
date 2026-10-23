@@ -111,12 +111,38 @@ def transform_keypoints(info: KpInfo) -> torch.Tensor:
     return x
 
 
+# LivePortrait's 21 implicit keypoints: which carry expressions and which mostly the face's
+# outline. The grouping follows LivePortrait's own "expression-friendly" mode, which takes
+# keypoints 1, 2, 6, 11-20 from the driver (brows, eyes, lips) and keeps the others from the
+# source, except the vertical movement of 3 and 4 (the jaw opening with the mouth).
+SHAPE_KEYPOINTS = (0, 3, 4, 5, 7, 8, 9, 10)
+JAW_KEYPOINTS = (3, 4)
+
+
+def identity_weights(lock: float, n_kp: int = 21) -> torch.Tensor:
+    """(1, n_kp, 3) weights for the user's expression change: 1 = copy, 0 = keep the character.
+
+    ``lock`` (0-1) is how much of the change on the outline keypoints is held back, so a user
+    with a rounder face or a wider nose doesn't pass that on to the character.
+    """
+    w = torch.ones(1, n_kp, 3)
+    w[:, list(SHAPE_KEYPOINTS), :] = 1.0 - lock
+    w[:, list(JAW_KEYPOINTS), 1] = 1.0
+    return w
+
+
 def relative_keypoints(
-    src: KpInfo, drv: KpInfo, drv0: KpInfo, *, pose_strength: float = 1.0
+    src: KpInfo,
+    drv: KpInfo,
+    drv0: KpInfo,
+    *,
+    pose_strength: float = 1.0,
+    exp_weights: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Character keypoints that copy the user's motion relative to calibration frame ``drv0``.
 
-    ``pose_strength`` scales head rotation/translation (1 = copy exactly).
+    ``pose_strength`` scales head rotation/translation (1 = copy exactly). ``exp_weights``
+    (see ``identity_weights``) scales the expression change per keypoint and axis.
     """
     if pose_strength == 1.0:
         r_rel = drv.rotation @ drv0.rotation.permute(0, 2, 1)
@@ -128,7 +154,8 @@ def relative_keypoints(
         )
         t_new = src.t + (drv.t - drv0.t) * k
     r_new = r_rel @ src.rotation
-    exp_new = src.exp + (drv.exp - drv0.exp)
+    d_exp = drv.exp - drv0.exp
+    exp_new = src.exp + (d_exp if exp_weights is None else d_exp * exp_weights)
     scale_new = src.scale * (drv.scale / drv0.scale)
     t_new = t_new.clone()
     t_new[:, 2] = 0

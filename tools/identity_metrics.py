@@ -1,12 +1,19 @@
 """Face-shape stability of a video: does the face keep the same proportions from frame to frame?
 
-    uv run python tools/identity_metrics.py VIDEO [--every N] [--image STILL]
+    uv run python tools/identity_metrics.py VIDEO [--every N] [--image STILL] [--driver DRIVER]
 
 For every Nth frame, MediaPipe face landmarks (3D, in pixels) give a few shape ratios that don't
 change when someone talks or blinks, all divided by the distance between the outer eye corners:
 cheek width, jaw width, nose width and eye-to-mouth-corner height. A real person's ratios only
 wobble by measuring noise; a much bigger spread on an avatar means its face shape drifts.
 With --image, the ratios of the still character image are printed for comparison.
+
+These ratios still move with expressions and head turns (a real person's own spread is ~4%),
+so spread alone can't tell drift from following the user. With --driver (the video that drove
+the avatar, same frame numbering) each ratio's change is compared frame by frame: the driver
+against its calibration frame 0, the avatar against the still image. "follows" is how well the
+avatar's change tracks the driver's (correlation); "own drift" is the avatar change that the
+driver doesn't explain (spread of the difference) and the closer to 0 the better.
 """
 
 from __future__ import annotations
@@ -75,9 +82,9 @@ def measure_video(path: Path, models_dir: Path, every: int = 1) -> dict[str, np.
                     mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb), int(i * 1000 / fps)
                 )
                 pts = _points(res, w, h)
-                if pts is not None:
-                    for k, v in ratios(pts).items():
-                        out[k].append(v)
+                r = ratios(pts) if pts is not None else dict.fromkeys(RATIOS, np.nan)
+                for k, v in r.items():
+                    out[k].append(v)
             i += 1
     cap.release()
     return {k: np.array(v) for k, v in out.items()}
@@ -99,6 +106,7 @@ def measure_image(path: Path, models_dir: Path) -> dict[str, float] | None:
 
 def report(name: str, m: dict[str, np.ndarray], ref: dict[str, float] | None = None) -> float:
     """Prints per-ratio spread; returns the mean spread (std / mean, in %)."""
+    m = {k: v[~np.isnan(v)] for k, v in m.items()}
     n = len(next(iter(m.values())))
     print(f"\n{name}: {n} frames with a face")
     spreads = []
@@ -119,6 +127,27 @@ def report(name: str, m: dict[str, np.ndarray], ref: dict[str, float] | None = N
     return float(np.mean(spreads))
 
 
+def compare(name: str, avatar: dict[str, np.ndarray], driver: dict[str, np.ndarray],
+            ref: dict[str, float]) -> None:  # fmt: skip
+    """Avatar shape change vs the driver's, frame by frame (see the module docstring)."""
+    print(f"\n{name} vs its driver (change in %: driver vs its frame 0, avatar vs the still)")
+    drifts = []
+    for k in RATIOS:
+        a, d = avatar[k], driver[k]
+        n = min(len(a), len(d))
+        a_ch = 100 * (a[:n] / ref[k] - 1)
+        d_ch = 100 * (d[:n] / d[0] - 1)
+        ok = ~(np.isnan(a_ch) | np.isnan(d_ch))
+        a_ch, d_ch = a_ch[ok], d_ch[ok]
+        follows = float(np.corrcoef(a_ch, d_ch)[0, 1])
+        drift = float(np.std(a_ch - d_ch))
+        drifts.append(drift)
+        print(f"  {k:<16} driver {d_ch.mean():+5.1f}% (sd {d_ch.std():3.1f})  avatar "
+              f"{a_ch.mean():+5.1f}% (sd {a_ch.std():3.1f})  follows {follows:.2f}  "
+              f"own drift {drift:3.1f}%  offset {a_ch.mean() - d_ch.mean():+5.1f}%")  # fmt: skip
+    print(f"  => average own drift {np.mean(drifts):.2f}%")
+
+
 def main() -> int:
     from common.config import Settings
 
@@ -128,11 +157,16 @@ def main() -> int:
     ap.add_argument("videos", nargs="+", type=Path)
     ap.add_argument("--every", type=int, default=1, help="measure every Nth frame")
     ap.add_argument("--image", type=Path, help="the still character image, for comparison")
+    ap.add_argument("--driver", type=Path, help="the driving video (needs --image)")
     a = ap.parse_args()
     models = Settings().paths.models
     ref = measure_image(a.image, models) if a.image else None
+    drv = measure_video(a.driver, models, a.every) if a.driver else None
     for v in a.videos:
-        report(v.name, measure_video(v, models, a.every), ref)
+        m = measure_video(v, models, a.every)
+        report(v.name, m, ref)
+        if drv is not None and ref is not None:
+            compare(v.name, m, drv, ref)
     return 0
 
 

@@ -115,6 +115,9 @@ class AvatarConfig(_Section):
     """The character is rendered at this height, then scaled to the output size."""
     pose_strength: float = Field(1.0, ge=0.0, le=2.0)
     expression_strength: float = Field(1.0, ge=0.0, le=2.0)
+    identity_lock: float = Field(0.0, ge=0.0, le=1.0)
+    """Hold back the user's expression changes on the face-outline keypoints (0 = copy all,
+    1 = keep the character's face shape; mouth, eyes and brows always follow)."""
     stitching: bool = True
     """Blend the animated head into the still shoulders (strongly recommended)."""
     eye_retarget: bool = False

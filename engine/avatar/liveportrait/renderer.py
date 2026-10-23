@@ -32,6 +32,7 @@ from engine.avatar.liveportrait.crop import (
 from engine.avatar.liveportrait.motion import (
     KpInfo,
     blend_toward,
+    identity_weights,
     relative_keypoints,
     transform_keypoints,
 )
@@ -154,6 +155,7 @@ class LivePortraitRenderer:
 
         # --- driving side state ---
         self.cropper = DrivingCropper()
+        self._w_exp = identity_weights(cfg.identity_lock).to(dev) if cfg.identity_lock > 0 else None
         self.f_pose = OneEuroFilter(cfg.pose_smoothing)
         self.f_exp = OneEuroFilter(cfg.expression_smoothing)
         self.drv0: KpInfo | None = None
@@ -237,7 +239,9 @@ class LivePortraitRenderer:
             scaled = exp0 + (p[_POSE_PARAMS:] - exp0) * k
             drv = info.with_params(np.concatenate([p[:_POSE_PARAMS], scaled]))
 
-        x_d = relative_keypoints(self.src, drv, self.drv0, pose_strength=self.cfg.pose_strength)
+        x_d = relative_keypoints(
+            self.src, drv, self.drv0, pose_strength=self.cfg.pose_strength, exp_weights=self._w_exp
+        )
         if self.cfg.lip_sync != "off" and self.mouth is not None:
             voice = self.mouth.openness(frame)
             if voice is not None:  # before stitching, as in LivePortrait's own retargeting
