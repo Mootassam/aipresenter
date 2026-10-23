@@ -9,7 +9,7 @@ Last updated: 2026-10-22
 | 0 Project setup | ✅ done (commit 50c435d) |
 | 1 Tracking + virtual camera | ✅ done (commit b43ab8e). softcam DLL not built yet (no compiler on the laptop) |
 | 2 Voice changer | ⏳ waiting on the owner (see below) |
-| 3 Avatar v1 (head + shoulders) | 🔨 on branch `phase3-avatar`: LivePortrait engine works; **27 fps on an RTX 4090** (2026-10-22, see below). Background fix + lip-sync hook done (CPU-checked). Next: watch lip-sync on the pod, identity stability, then check speed on an 8 GB card (RTX 5050 class) |
+| 3 Avatar v1 (head + shoulders) | 🔨 on branch `phase3-avatar`: LivePortrait engine works; **27 fps on an RTX 4090** (2026-10-22, see below). Background fix + lip-sync hook done and checked on a 4090; identity check done (face is fine at rest). **Next: the owner picks** (1) forehead wrinkles from strong brow raises, (2) lost resting smile, or (3) sharpness (Claude suggests 1 first), then check speed on an 8 GB card (RTX 5050 class) |
 | 4–9 | not started |
 
 ## Phase 3 notes
