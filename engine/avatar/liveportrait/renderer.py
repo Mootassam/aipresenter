@@ -23,7 +23,12 @@ import torch.nn.functional as F
 from common.config import AvatarConfig
 from common.timing import now_ms
 from engine.avatar.character import CharacterSource
-from engine.avatar.liveportrait.crop import DrivingCropper, eye_open_ratio, landmarks_px
+from engine.avatar.liveportrait.crop import (
+    DrivingCropper,
+    eye_open_ratio,
+    landmarks_px,
+    lip_open_ratio,
+)
 from engine.avatar.liveportrait.motion import (
     KpInfo,
     blend_toward,
@@ -31,6 +36,7 @@ from engine.avatar.liveportrait.motion import (
     transform_keypoints,
 )
 from engine.avatar.liveportrait.network import LivePortraitNet
+from engine.avatar.mouth import MouthSignal, lip_target
 from engine.io.frames import Frame, Image
 from engine.tracking.one_euro import OneEuroFilter
 from engine.tracking.types import TrackingResult
@@ -38,6 +44,7 @@ from engine.tracking.types import TrackingResult
 log = logging.getLogger(__name__)
 
 _MASK = Path(__file__).with_name("mask_template.png")
+KEY_BGR = (64, 177, 0)  # broadcast chroma green: the hidden layer behind image backgrounds
 _POSE_PARAMS = 7  # pitch, yaw, roll, tx, ty, tz, scale
 
 
@@ -69,6 +76,7 @@ class LivePortraitRenderer:
         cfg: AvatarConfig,
         *,
         background: Image | None = None,
+        mouth: MouthSignal | None = None,
         profile: bool = False,
     ) -> None:
         import cv2
@@ -76,13 +84,48 @@ class LivePortraitRenderer:
         self.net, self.cfg, self.profile = net, cfg, profile
         dev = net.device
         self.char = character
+        self.mouth = mouth
+        """Voice-driven mouth openness (lip-sync); used when ``cfg.lip_sync`` is on."""
         h, w = character.canvas.shape[:2]
         self.size = (w, h)
+
+        # --- background: placed behind the character BEFORE she is animated ---
+        # A matte made once from the still image can't follow a moving head (the old background
+        # showed through where the head had been). So the character first goes on a key green
+        # and the networks animate her on it: a moving head only ever reveals green. The Composer
+        # keys the green out every frame and puts in the chosen colour or image. (Using the
+        # colour directly left faint shading where the animated face is blended in: up to 22/255.)
+        base = character.canvas
+        key: tuple[float, float, float] | None = None
+        bg: torch.Tensor | None = None
+        if cfg.background != "original":
+            if character.alpha is None:
+                raise ValueError("background replacement needs a character matte")
+            if cfg.background == "image":
+                if background is None:
+                    raise ValueError("background image missing")
+                bg_bgr = _cover_resize(background, w, h)
+            else:
+                bg_bgr = np.empty((h, w, 3), np.uint8)
+                bg_bgr[:] = _hex_to_bgr(cfg.background_color)
+            bg_rgb = cv2.cvtColor(bg_bgr, cv2.COLOR_BGR2RGB)
+            bg = torch.from_numpy(bg_rgb).to(dev).permute(2, 0, 1)[None].float() / 255
+            key = (KEY_BGR[2] / 255, KEY_BGR[1] / 255, KEY_BGR[0] / 255)
+            a = character.alpha[..., None]
+            green = green_share(character.canvas, character.alpha)
+            if green > 0.01:
+                log.warning(
+                    "%.0f%% of the character is strong green: those parts will look see-through "
+                    "with background replacement (pick a character without green clothes)",
+                    100 * green,
+                )
+            fill = np.array(KEY_BGR, np.float32)
+            base = np.clip(a * character.canvas + (1 - a) * fill + 0.5, 0, 255).astype(np.uint8)
 
         # --- character (source) side, computed once ---
         m = character.crop.m_o2c[:2]
         crop512 = cv2.warpAffine(
-            character.canvas, m, (512, 512), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE
+            base, m, (512, 512), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE
         )
         small = cv2.resize(crop512, (256, 256), interpolation=cv2.INTER_AREA)
         src256 = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
@@ -93,7 +136,7 @@ class LivePortraitRenderer:
 
         # Canvas (RGB float, 1x3xHxW) and the paste-back sampling grid: for every canvas pixel,
         # where it lies in the 512 crop. Fixed because the character crop never moves.
-        canvas_rgb = cv2.cvtColor(character.canvas, cv2.COLOR_BGR2RGB)
+        canvas_rgb = cv2.cvtColor(base, cv2.COLOR_BGR2RGB)
         self.canvas = torch.from_numpy(canvas_rgb).to(dev).permute(2, 0, 1)[None].float() / 255
         mt = torch.from_numpy(character.crop.m_o2c).to(dev)
         ys, xs = torch.meshgrid(
@@ -107,23 +150,7 @@ class LivePortraitRenderer:
         mask = cv2.imread(str(_MASK), cv2.IMREAD_GRAYSCALE)
         mask_t = torch.from_numpy(mask).to(dev).float()[None, None] / 255
         self.mask = F.grid_sample(mask_t, self.grid, align_corners=False, padding_mode="zeros")
-
-        # Background: alpha from the character matte, replacement from colour or image
-        self.alpha: torch.Tensor | None = None
-        self.bg: torch.Tensor | None = None
-        if cfg.background != "original":
-            if character.alpha is None:
-                raise ValueError("background replacement needs a character matte")
-            self.alpha = torch.from_numpy(character.alpha).to(dev)[None, None]
-            if cfg.background == "image":
-                if background is None:
-                    raise ValueError("background image missing")
-                bg = cv2.cvtColor(_cover_resize(background, w, h), cv2.COLOR_BGR2RGB)
-            else:
-                bg = np.empty((h, w, 3), np.uint8)
-                bg[:] = _hex_to_bgr(cfg.background_color)[::-1]
-            self.bg = torch.from_numpy(bg).to(dev).permute(2, 0, 1)[None].float() / 255
-        self.composer = Composer(self.canvas, self.grid, self.mask, self.alpha, self.bg)
+        self.composer = Composer(self.canvas, self.grid, self.mask, bg=bg, key=key)
 
         # --- driving side state ---
         self.cropper = DrivingCropper()
@@ -211,6 +238,10 @@ class LivePortraitRenderer:
             drv = info.with_params(np.concatenate([p[:_POSE_PARAMS], scaled]))
 
         x_d = relative_keypoints(self.src, drv, self.drv0, pose_strength=self.cfg.pose_strength)
+        if self.cfg.lip_sync != "off" and self.mouth is not None:
+            voice = self.mouth.openness(frame)
+            if voice is not None:  # before stitching, as in LivePortrait's own retargeting
+                x_d = x_d + self._lip_delta(lip_open_ratio(pts), voice)
         if self.cfg.stitching:
             x_d = self.net.stitch(self.x_s, x_d)
         if self.cfg.eye_retarget:
@@ -225,6 +256,15 @@ class LivePortraitRenderer:
         ratio = torch.tensor([[src[0], src[1], cur]], device=self.net.device)
         neutral = torch.tensor([[src[0], src[1], float(src.mean())]], device=self.net.device)
         return self.net.retarget_eye(self.x_s, ratio) - self.net.retarget_eye(self.x_s, neutral)
+
+    def _lip_delta(self, tracked: float, voice: float) -> torch.Tensor:
+        """Keypoint change that moves the lips from the tracked opening to the lip-sync one."""
+        c = self.cfg
+        target = lip_target(tracked, voice, c.lip_sync_strength, c.lip_sync_max_ratio)
+        src = self.char.lip_ratio
+        ratio = torch.tensor([[src, target], [src, tracked]], device=self.net.device)
+        both = self.net.retarget_lip(self.x_s.expand(2, -1, -1), ratio)
+        return both[:1] - both[1:]
 
     def _face_lost(self, t_ms: float) -> torch.Tensor | None:
         """Ease the last pose back to neutral instead of freezing or snapping."""
@@ -243,8 +283,31 @@ def _to_bgr_u8(img: torch.Tensor) -> Image:
     return np.ascontiguousarray(u8.cpu().numpy())
 
 
+def green_share(img_bgr: Image, alpha: npt.NDArray[np.float32]) -> float:
+    """Share of the person (alpha > 0.5) that is green enough to be keyed out."""
+    b, g, r = (img_bgr[..., i].astype(np.int16) for i in range(3))
+    keyable = (g - np.maximum(r, b)) > 0.3 * (KEY_BGR[1] - KEY_BGR[0])
+    person = alpha > 0.5
+    return float((keyable & person).sum() / max(int(person.sum()), 1))
+
+
+def key_out(img: torch.Tensor, bg: torch.Tensor, key: tuple[float, float, float]) -> torch.Tensor:
+    """Replace a green key colour in ``img`` (1x3xHxW RGB, 0-1) with ``bg``.
+
+    A pixel is ``a * person + (1 - a) * key``. How much greener it is than its red / blue,
+    relative to the key's own green excess, gives ``1 - a`` (exact for neutral colours such as
+    hair; skin and clothes have no green excess and stay solid). The key's share is then swapped
+    for the background: ``img + (1 - a) * (bg - key)``, which also removes green fringes.
+    """
+    k = torch.tensor(key, device=img.device, dtype=img.dtype).view(1, 3, 1, 1)
+    excess = img[:, 1:2] - torch.maximum(img[:, 0:1], img[:, 2:3])
+    key_excess = key[1] - max(key[0], key[2])
+    see_through = ((excess / key_excess - 0.05) / 0.9).clamp(0, 1)  # small dead zones: no noise
+    return (img + see_through * (bg - k)).clamp(0, 1)
+
+
 class Composer:
-    """Pastes the animated 512 face into the character canvas (+ optional background swap).
+    """Pastes the animated 512 face into the character canvas (+ image background via a key).
 
     Only the face area changes between frames, so it is found once (where the paste mask is
     above zero) and only that part is computed and copied off the GPU; the rest comes from a
@@ -257,11 +320,12 @@ class Composer:
         canvas: torch.Tensor,
         grid: torch.Tensor,
         mask: torch.Tensor,
-        alpha: torch.Tensor | None = None,
+        *,
         bg: torch.Tensor | None = None,
+        key: tuple[float, float, float] | None = None,
     ) -> None:
-        self.alpha, self.bg = alpha, bg
-        self._still = _to_bgr_u8(self._swap_bg(canvas, alpha, bg))
+        self.key = key if bg is not None else None
+        self._still = _to_bgr_u8(self._swap_bg(canvas, bg))
         ys, xs = torch.nonzero(mask[0, 0] > 0, as_tuple=True)
         if ys.numel() == 0:
             self.roi = (0, 0, 0, 0)
@@ -271,16 +335,10 @@ class Composer:
         self.grid = grid[:, y0:y1, x0:x1]
         self.mask = mask[..., y0:y1, x0:x1]
         self.canvas = canvas[..., y0:y1, x0:x1]
-        self.alpha_roi = None if alpha is None else alpha[..., y0:y1, x0:x1]
         self.bg_roi = None if bg is None else bg[..., y0:y1, x0:x1]
 
-    @staticmethod
-    def _swap_bg(
-        img: torch.Tensor, alpha: torch.Tensor | None, bg: torch.Tensor | None
-    ) -> torch.Tensor:
-        if alpha is None or bg is None:
-            return img
-        return alpha * img + (1 - alpha) * bg
+    def _swap_bg(self, img: torch.Tensor, bg: torch.Tensor | None) -> torch.Tensor:
+        return img if self.key is None or bg is None else key_out(img, bg, self.key)
 
     def still(self) -> Image:
         """The character without animation (no face tracked yet)."""
@@ -293,7 +351,7 @@ class Composer:
         if y1 > y0 and x1 > x0:
             pasted = F.grid_sample(face, self.grid, align_corners=False, padding_mode="zeros")
             part = self.mask * pasted + (1 - self.mask) * self.canvas
-            img[y0:y1, x0:x1] = _to_bgr_u8(self._swap_bg(part, self.alpha_roi, self.bg_roi))
+            img[y0:y1, x0:x1] = _to_bgr_u8(self._swap_bg(part, self.bg_roi))
         return img
 
 

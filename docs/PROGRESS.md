@@ -9,7 +9,7 @@ Last updated: 2026-10-22
 | 0 Project setup | ✅ done (commit 50c435d) |
 | 1 Tracking + virtual camera | ✅ done (commit b43ab8e). softcam DLL not built yet (no compiler on the laptop) |
 | 2 Voice changer | ⏳ waiting on the owner (see below) |
-| 3 Avatar v1 (head + shoulders) | 🔨 on branch `phase3-avatar`: LivePortrait engine works; **27 fps on an RTX 4090** (2026-10-22, see below). Next: identity stability, lip-sync hook, better matting, then check speed on an 8 GB card (RTX 5050 class) |
+| 3 Avatar v1 (head + shoulders) | 🔨 on branch `phase3-avatar`: LivePortrait engine works; **27 fps on an RTX 4090** (2026-10-22, see below). Background fix + lip-sync hook done (CPU-checked). Next: watch lip-sync on the pod, identity stability, then check speed on an 8 GB card (RTX 5050 class) |
 | 4–9 | not started |
 
 ## Phase 3 notes
@@ -54,6 +54,32 @@ Last updated: 2026-10-22
   file source is 30 fps, so this is close to every frame. Results: `results/runpod-2026-10-22c/`.
 - Per frame now: tracking ~20 ms (CPU) in parallel with render ~34 ms (motion 12 + GPU work ~22).
 - TensorRT is not needed for the 4090. Still to check: an 8 GB RTX 5050-class card.
+
+### Background fix (2026-10-22, CPU-checked)
+- With background replacement, the old background showed through where the head moved. Now the
+  character is first put on a hidden key green, animated on it, and the green is keyed out every
+  frame (`key_out` in the renderer). Warns if the character wears strong green.
+- `stretch_matte`: the segmenter never reached 0 on the background; its 1st/99th percentiles are
+  now mapped to 0/1, so the old background no longer shows through faintly.
+- Tools: `tools/render_frames.py` (render chosen/hardest frames side by side, works on the CPU),
+  `tools/identity_metrics.py` (face-shape drift of a video: ratios that don't change when talking).
+
+### Lip-sync hook (2026-10-22, CPU-checked)
+- `engine/avatar/mouth.py`: `VoiceMouthMeter` turns voice audio into mouth openness 0-1 every
+  10 ms (speech-band loudness between an adaptive noise floor and the recent peak, fast open,
+  slower close). `MouthMailbox` is where the voice engine (Phase 2) will publish it.
+  `FileMouthTrack` uses a test video's own audio (via ffmpeg, dev only).
+- The renderer moves the lips with LivePortrait's lip-retargeting network: tracked opening pulled
+  toward the voice (`avatar.lip_sync`, `lip_sync_strength` 0.6, `lip_sync_max_ratio` 0.4,
+  `lip_sync_offset_ms`). Silence closes an open mouth only half as strongly (a silent laugh
+  stays open). Default **off** until the voice engine exists.
+- Try it: `uv run aip track --file samples	alk.mp4 --character samples\character.png --lip-sync`
+  (`--lip-strength 1` = voice only). Check single frames: `tools/render_frames.py ... --mouth 1.0`.
+- CPU check: voice 1.0 opens a closed mouth naturally (teeth visible); silence half-closes an
+  open one. Not yet watched as a moving video with sound (needs the GPU pod).
+- Finding: in `samples/talk.mp4` the lips follow the sound only weakly (correlation ~0.2, broad
+  peak at +300 ms), so it is a poor clip for tuning timing. A clip of the owner talking into
+  their webcam would be better.
 
 ## Waiting on the owner before Phase 2
 

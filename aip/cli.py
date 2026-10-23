@@ -94,6 +94,23 @@ def _parse_size(text: str) -> tuple[int, int]:
         raise argparse.ArgumentTypeError(f"size must look like 1280x720, got {text!r}") from None
 
 
+def _mouth_track(s: Settings) -> Any:
+    """Voice-driven mouth signal from the test video's own audio (until the voice engine)."""
+    import cv2
+
+    from engine.avatar.mouth import FileMouthTrack
+
+    if s.video.source != "file" or s.video.file_path is None:
+        raise SystemExit("--lip-sync needs --file for now (live voice comes with the voice engine)")
+    cap = cv2.VideoCapture(str(s.video.file_path))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    return FileMouthTrack.from_video(
+        s.video.file_path, fps, n, offset_ms=s.avatar.lip_sync_offset_ms
+    )
+
+
 def _make_renderer(s: Settings, *, profile: bool = False) -> Any:
     """Debug overlay (Phase 1) or the LivePortrait avatar (Phase 3)."""
     if s.avatar.renderer == "debug":
@@ -124,7 +141,8 @@ def _make_renderer(s: Settings, *, profile: bool = False) -> Any:
         compile=s.avatar.compile,
         cuda_graphs=s.avatar.cuda_graphs,
     )
-    return LivePortraitRenderer(net, char, s.avatar, background=bg, profile=profile)
+    mouth = _mouth_track(s) if s.avatar.lip_sync != "off" else None
+    return LivePortraitRenderer(net, char, s.avatar, background=bg, mouth=mouth, profile=profile)
 
 
 def cmd_character_check(args: argparse.Namespace) -> int:
@@ -179,6 +197,12 @@ def cmd_track(args: argparse.Namespace) -> int:
         s.avatar.background = "image"
     if args.cpu:
         s.avatar.device = "cpu"
+    if args.lip_sync:
+        s.avatar.lip_sync = "blend"
+    if args.lip_strength is not None:
+        s.avatar.lip_sync_strength = args.lip_strength
+    if args.lip_offset_ms is not None:
+        s.avatar.lip_sync_offset_ms = args.lip_offset_ms
     if args.compile:
         s.avatar.compile = True
     if args.no_cuda_graphs:
@@ -296,6 +320,13 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--background", choices=["original", "color", "image"])
     tr.add_argument("--bg-image", metavar="IMAGE", help="background image (implies image mode)")
     tr.add_argument("--cpu", action="store_true", help="run the avatar on the CPU (very slow)")
+    tr.add_argument(
+        "--lip-sync",
+        action="store_true",
+        help="also drive the mouth from the video file's voice (test of the lip-sync hook)",
+    )
+    tr.add_argument("--lip-strength", type=float, help="0 = camera only, 1 = voice only")
+    tr.add_argument("--lip-offset-ms", type=float, help="shift the voice against the video")
     tr.add_argument("--profile", action="store_true", help="exact per-step GPU timings (slower)")
     tr.add_argument("--record", metavar="MP4", help="also save the output to a video file")
     tr.add_argument("--compile", action="store_true", help="torch.compile the avatar (Linux)")

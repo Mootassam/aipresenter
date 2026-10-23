@@ -7,7 +7,9 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from engine.avatar.liveportrait.renderer import Composer, _to_bgr_u8
+from engine.avatar.liveportrait.renderer import KEY_BGR, Composer, _to_bgr_u8, key_out
+
+KEY = (KEY_BGR[2] / 255, KEY_BGR[1] / 255, KEY_BGR[0] / 255)
 
 
 def _setup(h: int = 90, w: int = 120) -> tuple[torch.Tensor, ...]:
@@ -27,29 +29,29 @@ def _setup(h: int = 90, w: int = 120) -> tuple[torch.Tensor, ...]:
 
 
 def _full(canvas: torch.Tensor, grid: torch.Tensor, mask: torch.Tensor, face: torch.Tensor,
-          alpha: torch.Tensor | None, bg: torch.Tensor | None) -> np.ndarray:  # fmt: skip
-    """The previous renderer: composite the whole canvas."""
+          bg: torch.Tensor | None) -> np.ndarray:  # fmt: skip
+    """Reference: composite (and key) the whole canvas."""
     pasted = F.grid_sample(face, grid, align_corners=False, padding_mode="zeros")
     out = mask * pasted + (1 - mask) * canvas
-    if alpha is not None and bg is not None:
-        out = alpha * out + (1 - alpha) * bg
+    if bg is not None:
+        out = key_out(out, bg, KEY)
     return _to_bgr_u8(out)
 
 
 @pytest.mark.parametrize("with_bg", [False, True])
 def test_same_pixels_as_full_canvas(with_bg: bool) -> None:
-    canvas, grid, mask, face, alpha, bg = _setup()
-    a, b = (alpha, bg) if with_bg else (None, None)
-    comp = Composer(canvas, grid, mask, a, b)
+    canvas, grid, mask, face, _, bg = _setup()
+    b = bg if with_bg else None
+    comp = Composer(canvas, grid, mask, bg=b, key=KEY)
     y0, y1, x0, x1 = comp.roi
     assert (y1 - y0) * (x1 - x0) < canvas.shape[2] * canvas.shape[3]  # really a smaller area
-    np.testing.assert_array_equal(comp.compose(face), _full(canvas, grid, mask, face, a, b))
+    np.testing.assert_array_equal(comp.compose(face), _full(canvas, grid, mask, face, b))
 
 
 def test_still_is_the_unanimated_character() -> None:
-    canvas, grid, mask, _, alpha, bg = _setup()
-    comp = Composer(canvas, grid, mask, alpha, bg)
-    np.testing.assert_array_equal(comp.still(), _to_bgr_u8(alpha * canvas + (1 - alpha) * bg))
+    canvas, grid, mask, _, _, bg = _setup()
+    comp = Composer(canvas, grid, mask, bg=bg, key=KEY)
+    np.testing.assert_array_equal(comp.still(), _to_bgr_u8(key_out(canvas, bg, KEY)))
 
 
 def test_frames_are_independent_copies() -> None:
@@ -64,3 +66,37 @@ def test_empty_mask() -> None:
     canvas, grid, _, face, _, _ = _setup()
     comp = Composer(canvas, grid, torch.zeros(1, 1, *canvas.shape[2:]))
     np.testing.assert_array_equal(comp.compose(face), _to_bgr_u8(canvas))
+
+
+def _px(rgb: tuple[float, float, float]) -> torch.Tensor:
+    return torch.tensor(rgb).view(1, 3, 1, 1)
+
+
+def test_key_colour_becomes_the_background() -> None:
+    bg = _px((0.2, 0.3, 0.9))
+    assert torch.allclose(key_out(_px(KEY), bg, KEY), bg, atol=1e-6)
+
+
+@pytest.mark.parametrize("person", [(0.25, 0.2, 0.15), (0.9, 0.7, 0.6), (0.5, 0.5, 0.5)])
+def test_person_colours_stay(person: tuple[float, float, float]) -> None:
+    # dark hair, skin, grey: no green excess -> untouched
+    assert torch.allclose(key_out(_px(person), _px((0, 0, 1)), KEY), _px(person), atol=1e-6)
+
+
+def test_half_transparent_hair_edge_gets_the_new_background() -> None:
+    hair, bg = _px((0.3, 0.3, 0.3)), _px((0.9, 0.1, 0.1))
+    edge = 0.5 * hair + 0.5 * _px(KEY)  # what the network draws at a hair edge on the key
+    out = key_out(edge, bg, KEY)
+    want = 0.5 * hair + 0.5 * bg
+    assert (out - want).abs().max() < 0.05  # no green fringe left
+
+
+def test_green_share_counts_only_the_person() -> None:
+    from engine.avatar.liveportrait.renderer import green_share
+
+    img = np.zeros((10, 10, 3), np.uint8)
+    img[:] = (90, 120, 200)  # skin-ish (BGR)
+    img[:, :5] = (40, 200, 40)  # green on the left half
+    alpha = np.zeros((10, 10), np.float32)
+    alpha[:, 3:] = 1.0  # the person covers columns 3-9: 2 of their 7 columns are green
+    assert green_share(img, alpha) == pytest.approx(2 / 7)

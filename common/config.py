@@ -125,6 +125,15 @@ class AvatarConfig(_Section):
     pose_smoothing: OneEuroConfig = OneEuroConfig(min_cutoff=1.0, beta=0.05, d_cutoff=1.0)
     """Head pose (degrees) + translation + scale."""
     expression_smoothing: OneEuroConfig = OneEuroConfig(min_cutoff=2.5, beta=2.0, d_cutoff=1.0)
+    lip_sync: Literal["off", "blend"] = "off"
+    """Also drive the mouth from the voice (needs a voice signal: the voice engine, or the
+    audio of a test video file). Off until the voice engine exists."""
+    lip_sync_strength: float = Field(0.6, ge=0.0, le=1.0)
+    """0 = mouth follows the camera only, 1 = mouth follows the voice only."""
+    lip_sync_max_ratio: float = Field(0.4, ge=0.1, le=0.8)
+    """Lip opening (inner-lip gap / mouth width) for the loudest speech."""
+    lip_sync_offset_ms: float = Field(0.0, ge=-500.0, le=500.0)
+    """Shift the voice signal against the video (positive = use later audio)."""
     lost_face_ease_s: float = Field(0.5, ge=0.0, le=5.0)
     """When the face disappears, glide back to the neutral pose over this time."""
 

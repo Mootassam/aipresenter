@@ -189,6 +189,19 @@ def check_quality(img: Image, faces: list[FaceInfo]) -> list[QualityIssue]:
     return issues
 
 
+def stretch_matte(alpha: F32) -> F32:
+    """Map the segmenter's floor / ceiling to 0 / 1.
+
+    Its confidences never reach 0 on the background (~0.08 everywhere on the sample), which lets
+    the old background show through faintly. The 1st / 99th percentiles are clear background /
+    clear person in any usable portrait (the person covers far more than 1% and far less than 99%).
+    """
+    lo, hi = np.percentile(alpha, [1, 99])
+    if hi - lo < 0.3:  # nothing clear to stretch (no person, or the image is all person)
+        return alpha
+    return np.clip((alpha - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+
+
 def person_matte(img: Image, models_dir: Path) -> F32:
     """Soft person mask (hair, body, clothes) with MediaPipe's multiclass selfie segmenter."""
     import cv2
@@ -208,7 +221,7 @@ def person_matte(img: Image, models_dir: Path) -> F32:
         res = seg.segment(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb))
     # class 0 = background; person = 1 - background confidence
     bg = res.confidence_masks[0].numpy_view().astype(np.float32)
-    alpha = np.clip(1.0 - bg, 0.0, 1.0)
+    alpha = stretch_matte(np.clip(1.0 - bg, 0.0, 1.0))
     if alpha.shape != img.shape[:2]:
         alpha = cv2.resize(alpha, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_LINEAR)
     # Edge-aware refinement so hair edges follow the image instead of the 256 px mask grid

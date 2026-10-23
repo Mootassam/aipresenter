@@ -66,3 +66,19 @@ def test_real_sample_is_usable() -> None:
     faces = detect_faces(img, Settings().paths.models)
     assert len(faces) == 1
     assert not [i for i in check_quality(img, faces) if i.blocking]
+
+
+def test_stretch_matte_cleans_the_floor() -> None:
+    from engine.avatar.character import stretch_matte
+
+    a = np.full((100, 100), 0.08, np.float32)  # the segmenter's floor on the background
+    a[30:80, 20:80] = 0.97  # the person
+    out = stretch_matte(a)
+    assert out[0, 0] == 0.0 and out[50, 50] == 1.0
+
+
+def test_stretch_matte_leaves_unclear_masks_alone() -> None:
+    from engine.avatar.character import stretch_matte
+
+    a = np.full((50, 50), 0.4, np.float32)
+    np.testing.assert_array_equal(stretch_matte(a), a)
