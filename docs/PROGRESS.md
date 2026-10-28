@@ -143,6 +143,19 @@ Last updated: 2026-10-22
   then the 8 GB (RTX 5050 class) speed check. If more detail is wanted later: a face
   restoration model with a commercial licence (not CodeFormer).
 
+### RunPod check of fixes 1-3 (2026-10-28, RTX 4090, `results/runpod-2026-10-28/`, not in git)
+- `tools/runpod_bench.sh` step 5 now records the video with the fixes off too, runs
+  identity_metrics on both and makes `compare_fixes.mp4` (driver | before | after, with sound).
+- Real time: **26.1 fps**, delay p50 66 / p95 87 ms (was 27.2 fps on another 4090 pod; pods
+  differ in CPU). Profile: compose 5.3 ms incl. sharpening, warp_decode 18.7, motion 15.7.
+  GPU memory: PyTorch peak 1.1 GB, card peak 2.1 GB.
+- Face shape vs the still (avg off by), fixes off -> on: eye-to-mouth +9.2/+9.5% -> +2.4/+2.5%
+  (resting smile back), nose -4.6% -> -2.2%, cheek +1.2% -> +0.2%, jaw -2.4% -> -2.0%.
+  Own drift about the same (2.59% -> 2.71%), jitter the same (0.33%).
+- Pod: Claude could not stop/terminate it (blocked by the permission guard): the owner
+  terminates it in the RunPod web page. Self-stop timer was set to 60 min.
+- Next: the 8 GB card (RTX 5050 class) speed check, then Phase 4.
+
 ## Waiting on the owner before Phase 2
 
 1. Install VB-Audio Virtual Cable (vb-audio.com/Cable) and restart the PC.
