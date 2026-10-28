@@ -115,6 +115,21 @@ Last updated: 2026-10-22
   the expression is unchanged.
 - Next: fix (2) resting smile, then (3) sharpness, then the 8 GB card speed check.
 
+### Fix 2: resting smile (2026-10-28, CPU-checked)
+- Cause measured: in `talk.mp4` frame 0 (the calibration frame) the user smiles (MediaPipe smile
+  0.73; calm quiet frames ~0.25), so every calmer face pulled the character's smile below her
+  still.
+- `NeutralExpression` (`motion.py`): head pose still calibrates on frame 0, but for
+  `avatar.neutral_window_s` (5 s, `--neutral-window`, 0 = off) the **mouth keypoints only**
+  (13, 14, 16, 17, 19, 20, the ones LivePortrait's smile/lip editors move) of the expression
+  baseline move to the calmest face seen (`calm_score` = smile + jaw open), easing over 300 ms.
+- First try moved the whole expression baseline: smile came back, but she frowned/squinted on
+  calm frames and her face shape changed. Mouth-only fixed both.
+- `tools/render_frames.py --neutral-compare`: driver | frame-0 baseline | settled
+  (`results/smile-check2/`, frames 231, 852, 1307).
+- Next: fix (3) sharpness, then the 8 GB card speed check. A full-video GPU run should confirm
+  fixes 1 + 2 together (identity_metrics eye-to-mouth offset was +9%).
+
 ## Waiting on the owner before Phase 2
 
 1. Install VB-Audio Virtual Cable (vb-audio.com/Cable) and restart the PC.

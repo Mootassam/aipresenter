@@ -167,6 +167,59 @@ def limit_brow_raise(
     return out
 
 
+# MediaPipe face blendshapes come in a fixed order of 52 (checked against blendshape_names).
+_BS_JAW_OPEN = 25
+_BS_SMILE_L, _BS_SMILE_R = 44, 45
+# Mouth keypoints of the expression offsets: the ones LivePortrait's smile and lip editors move.
+_MOUTH_KP = (13, 14, 16, 17, 19, 20)
+_MOUTH = np.zeros(NUM_KP * 3, bool)
+for _k in _MOUTH_KP:
+    _MOUTH[_k * 3 : _k * 3 + 3] = True
+
+
+def calm_score(blendshapes: npt.NDArray[np.float32]) -> float:
+    """How far a face is from calm: smile + open mouth (0 = calm, mouth closed)."""
+    smile = (float(blendshapes[_BS_SMILE_L]) + float(blendshapes[_BS_SMILE_R])) / 2
+    return smile + float(blendshapes[_BS_JAW_OPEN])
+
+
+class NeutralExpression:
+    """Expression baseline that settles on the calmest face seen shortly after calibrating.
+
+    Expression is copied relative to the baseline, so if the user smiles in the calibration
+    frame, every calmer face takes the character's own resting smile away. For ``window_ms``
+    after :meth:`reset` the mouth part of the baseline moves to any calmer face (lower
+    :func:`calm_score`), easing over ``ease_ms`` so the character doesn't jump. Eyes, brows and
+    face outline keep the calibration frame's values (moving them changed her face shape).
+    """
+
+    def __init__(self, window_ms: float, ease_ms: float = 300.0) -> None:
+        self.window_ms = window_ms
+        self.ease_ms = ease_ms
+        self.exp: npt.NDArray[np.float32] = np.zeros(0, np.float32)
+        self._target: npt.NDArray[np.float32] = self.exp
+        self._best = 0.0
+        self._t0 = self._t_last = 0.0
+
+    def reset(self, exp: npt.NDArray[np.float32], score: float, t_ms: float) -> None:
+        self.exp = exp.astype(np.float32, copy=True)
+        self._target = self.exp.copy()
+        self._best = score
+        self._t0 = self._t_last = t_ms
+
+    def update(
+        self, exp: npt.NDArray[np.float32], score: float, t_ms: float
+    ) -> npt.NDArray[np.float32]:
+        """Feed the current (smoothed) expression; returns the baseline to use now."""
+        if t_ms - self._t0 <= self.window_ms and score < self._best:
+            self._best = score
+            self._target = np.where(_MOUTH, exp, self._target).astype(np.float32)
+        a = 1.0 if self.ease_ms <= 0 else min(1.0, max(0.0, t_ms - self._t_last) / self.ease_ms)
+        self.exp = self.exp + (self._target - self.exp) * a
+        self._t_last = t_ms
+        return self.exp
+
+
 def blend_toward(x: torch.Tensor, target: torch.Tensor, alpha: float) -> torch.Tensor:
     """Linear blend used to ease back to the neutral pose when the face is lost."""
     return x + (target - x) * alpha

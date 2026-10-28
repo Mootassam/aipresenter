@@ -205,6 +205,8 @@ def cmd_track(args: argparse.Namespace) -> int:
         s.avatar.lip_sync_offset_ms = args.lip_offset_ms
     if args.brow_max is not None:
         s.avatar.brow_raise_max = args.brow_max
+    if args.neutral_window is not None:
+        s.avatar.neutral_window_s = args.neutral_window
     if args.compile:
         s.avatar.compile = True
     if args.no_cuda_graphs:
@@ -330,6 +332,9 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument("--lip-strength", type=float, help="0 = camera only, 1 = voice only")
     tr.add_argument("--lip-offset-ms", type=float, help="shift the voice against the video")
     tr.add_argument("--brow-max", type=float, help="cap on brow raises (0 = no limit)")
+    tr.add_argument(
+        "--neutral-window", type=float, help="seconds to find the calmest face (0 = off)"
+    )
     tr.add_argument("--profile", action="store_true", help="exact per-step GPU timings (slower)")
     tr.add_argument("--record", metavar="MP4", help="also save the output to a video file")
     tr.add_argument("--compile", action="store_true", help="torch.compile the avatar (Linux)")

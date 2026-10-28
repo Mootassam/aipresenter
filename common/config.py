@@ -118,6 +118,10 @@ class AvatarConfig(_Section):
     brow_raise_max: float = Field(0.015, ge=0.0, le=0.1)
     """Soft limit on how far the character's brows go up (0 = no limit). Strong brow raises
     put forehead wrinkles on her; 0.015 lets normal talking through and caps big raises."""
+    neutral_window_s: float = Field(5.0, ge=0.0, le=60.0)
+    """For this long after calibrating, the expression baseline moves to the calmest face seen
+    (least smile, mouth closed). A user who smiles while calibrating would otherwise take away
+    the character's own resting smile. 0 = keep the calibration frame's expression."""
     stitching: bool = True
     """Blend the animated head into the still shoulders (strongly recommended)."""
     eye_retarget: bool = False

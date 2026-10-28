@@ -107,3 +107,39 @@ def test_limit_brow_raise_leaves_frowns_and_off_alone() -> None:
     up = exp0.copy()
     up[7] = -0.05
     assert np.array_equal(limit_brow_raise(up, exp0, 0.0), up)
+
+
+def test_calm_score_counts_smile_and_open_mouth() -> None:
+    from engine.avatar.liveportrait.motion import calm_score
+
+    b = np.zeros(52, np.float32)
+    assert calm_score(b) == 0.0
+    b[44], b[45], b[25] = 0.8, 0.6, 0.3  # smile left/right, jaw open
+    assert calm_score(b) == pytest.approx(0.7 + 0.3)
+
+
+def test_neutral_expression_settles_on_calmest_face_in_window() -> None:
+    from engine.avatar.liveportrait.motion import NeutralExpression
+
+    smiling, calm, calmer = (np.full(63, v, np.float32) for v in (1.0, 0.0, -1.0))
+    mouth = np.zeros(63, bool)
+    for k in (13, 14, 16, 17, 19, 20):
+        mouth[k * 3 : k * 3 + 3] = True
+    n = NeutralExpression(window_ms=1000, ease_ms=0)
+    n.reset(smiling, 0.8, 0.0)
+    assert np.allclose(n.update(smiling, 0.9, 100), 1.0)  # less calm: ignored
+    base = n.update(calm, 0.2, 500)  # calmer: its mouth becomes the baseline
+    assert np.allclose(base[mouth], 0.0)
+    assert np.allclose(base[~mouth], 1.0)  # eyes, brows, outline stay from calibration
+    assert np.allclose(n.update(smiling, 0.9, 600)[mouth], 0.0)  # and stays
+    assert np.allclose(n.update(calmer, 0.0, 1500)[mouth], 0.0)  # after the window: frozen
+
+
+def test_neutral_expression_eases_instead_of_jumping() -> None:
+    from engine.avatar.liveportrait.motion import NeutralExpression
+
+    n = NeutralExpression(window_ms=5000, ease_ms=300)
+    n.reset(np.ones(63, np.float32), 0.8, 0.0)
+    first = n.update(np.zeros(63, np.float32), 0.1, 100.0)
+    assert np.allclose(first[14 * 3], 2 / 3)  # one third of the way after 100 of 300 ms
+    assert np.allclose(n.update(np.zeros(63, np.float32), 0.5, 400.0)[14 * 3], 0.0)

@@ -7,6 +7,9 @@ Frame 0 calibrates the neutral pose. ``--pick N`` chooses the N frames with the 
 turn / tilt / nod (the hardest cases for edges and background), ``--frames`` lists them by hand.
 Each output image is the driving frame and the character side by side. ``--mouth X`` checks
 the lip-sync hook: a third panel shows the same frame with a voice openness of X (0-1).
+``--neutral-compare`` runs the first ``neutral_window_s`` seconds through the motion step so
+the expression baseline settles on the calmest face, then shows frame-0 baseline | settled.
+Without it the baseline is frame 0's expression.
 """
 
 from __future__ import annotations
@@ -47,6 +50,11 @@ def main() -> int:
     ap.add_argument(
         "--brow-compare", action="store_true", help="also render without the brow-raise limit"
     )
+    ap.add_argument(
+        "--neutral-compare",
+        action="store_true",
+        help="settle the expression baseline first, also render with frame 0's",
+    )
     a = ap.parse_args()
 
     s = Settings()
@@ -73,6 +81,9 @@ def main() -> int:
     # with --frames only frame 0 + those are tracked (in order, so video-mode timestamps still rise)
     listed = sorted({int(x) for x in a.frames.split(",")}) if a.frames else None
     todo = [0, *listed] if listed else list(range(len(frames)))
+    warmup = range(1, min(len(frames), round(s.avatar.neutral_window_s * fps) + 1))
+    if a.neutral_compare:
+        todo = sorted({*todo, *warmup})
     tracker = MediaPipeTracker(s.tracking, s.paths.models)
     tracks = {i: tracker.process(Frame(frames[i], i, i * 1000 / fps)) for i in todo}
     tracker.close()
@@ -100,11 +111,26 @@ def main() -> int:
     renderer = _make_renderer(s)
     a.out.mkdir(parents=True, exist_ok=True)
     renderer.render(Frame(frames[0], 0, 0.0), tracks[0])  # neutral calibration
+    drv0_first = renderer.drv0
+    if a.neutral_compare:  # motion step only (cheap): lets the baseline find the calmest face
+        for j in warmup:
+            if tracks[j].face is not None:
+                renderer._driving_keypoints(Frame(frames[j], j, j * 1000 / fps), tracks[j])
+    drv0_main = renderer.drv0
+    # the chosen frames are rendered out of order: freeze the baseline from here on
+    s.avatar = s.avatar.model_copy(update={"neutral_window_s": 0.0})
+    renderer.cfg = s.avatar
     for i in chosen:
         renderer.f_pose.reset()
         renderer.f_exp.reset()
         frame = Frame(frames[i], i, i * 1000 / fps)
         imgs = [renderer.render(frame, tracks[i]).copy()]
+        if a.neutral_compare:  # order: driver | frame-0 baseline | settled
+            renderer.f_pose.reset()
+            renderer.f_exp.reset()
+            renderer.drv0 = drv0_first
+            imgs.insert(0, renderer.render(frame, tracks[i]).copy())
+            renderer.drv0 = drv0_main
         if a.brow_compare:  # order: driver | no limit | with limit
             renderer.f_pose.reset()
             renderer.f_exp.reset()

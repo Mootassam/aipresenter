@@ -31,7 +31,9 @@ from engine.avatar.liveportrait.crop import (
 )
 from engine.avatar.liveportrait.motion import (
     KpInfo,
+    NeutralExpression,
     blend_toward,
+    calm_score,
     limit_brow_raise,
     relative_keypoints,
     transform_keypoints,
@@ -158,6 +160,7 @@ class LivePortraitRenderer:
         self.f_pose = OneEuroFilter(cfg.pose_smoothing)
         self.f_exp = OneEuroFilter(cfg.expression_smoothing)
         self.drv0: KpInfo | None = None
+        self.neutral = NeutralExpression(cfg.neutral_window_s * 1000)
         self._last_params: npt.NDArray[np.float32] | None = None
         self._last_xd: torch.Tensor | None = None
         self._lost_since: float | None = None
@@ -227,10 +230,16 @@ class LivePortraitRenderer:
         p[_POSE_PARAMS:] = self.f_exp(raw[_POSE_PARAMS:], t)
         drv = info.with_params(p)
 
+        calm = calm_score(track.face.blendshapes)
         if self._recalibrate or self.drv0 is None:
             self.drv0 = drv
+            self.neutral.reset(p[_POSE_PARAMS:], calm, t)
             self._recalibrate = False
             log.info("calibrated neutral pose")
+        elif self.cfg.neutral_window_s > 0:
+            d0 = self.drv0.to_params()
+            d0[_POSE_PARAMS:] = self.neutral.update(p[_POSE_PARAMS:], calm, t)
+            self.drv0 = self.drv0.with_params(d0)
 
         k, brow_max = self.cfg.expression_strength, self.cfg.brow_raise_max
         if k != 1.0 or brow_max > 0:
