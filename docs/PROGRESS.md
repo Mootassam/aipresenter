@@ -156,6 +156,11 @@ Last updated: 2026-10-22
   terminates it in the RunPod web page. Self-stop timer was set to 60 min.
 - Next: the 8 GB card (RTX 5050 class) speed check, then Phase 4.
 
+### Phase 4 research (2026-10-28)
+- Owner moved the 8 GB check to later. Model + licence research is in `docs/PHASE4_RESEARCH.md`.
+  No real-time + commercial-OK upper-body/hands model exists today. Next: RunPod test of
+  Wan-Animate-2 distilled (Apache 2.0), watch for Wan-Animate-2-Lite weights.
+
 ## Waiting on the owner before Phase 2
 
 1. Install VB-Audio Virtual Cable (vb-audio.com/Cable) and restart the PC.
