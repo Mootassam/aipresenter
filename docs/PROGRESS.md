@@ -127,8 +127,21 @@ Last updated: 2026-10-22
   calm frames and her face shape changed. Mouth-only fixed both.
 - `tools/render_frames.py --neutral-compare`: driver | frame-0 baseline | settled
   (`results/smile-check2/`, frames 231, 852, 1307).
-- Next: fix (3) sharpness, then the 8 GB card speed check. A full-video GPU run should confirm
+- Next (done below): fix (3) sharpness, then the 8 GB card speed check. A full-video GPU run should confirm
   fixes 1 + 2 together (identity_metrics eye-to-mouth offset was +9%).
+
+### Fix 3: sharpness (2026-10-28, CPU-checked)
+- Measured (Laplacian variance inside the face, same face at rest): still 210, render 42 (5x
+  softer). Causes: the generator works from a 256 copy of the face, and its 512 output is
+  enlarged to ~735 canvas px for samples/character.png.
+- `Composer(sharpen=...)` / `avatar.face_sharpen` 0.8 (`--sharpen`, 0 = off = old pixels
+  exactly): unsharp mask (sigma 1 px in 512 space) on the face, then bicubic paste.
+  Scores: bicubic alone 68, + sharpen 0.6 -> 151, 0.8 -> ~190, 1.0 -> 225.
+  No halos or seams seen (`results/sharp-check/`). Cost on the GPU not measured yet (2 small
+  convolutions on 512x512, expected < 1 ms).
+- Next: one RunPod run on the full video to confirm fixes 1-3 together (speed + identity_metrics),
+  then the 8 GB (RTX 5050 class) speed check. If more detail is wanted later: a face
+  restoration model with a commercial licence (not CodeFormer).
 
 ## Waiting on the owner before Phase 2
 

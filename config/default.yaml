@@ -54,6 +54,7 @@ avatar:
   expression_strength: 1.0 # 0..2
   brow_raise_max: 0.015    # soft cap on brow raises (forehead wrinkles); 0 = no limit
   neutral_window_s: 5.0    # seconds to look for the calmest face as expression baseline; 0 = off
+  face_sharpen: 0.8        # 0..2, sharpen the animated face (0 = off, as soft as the generator)
   stitching: true
   eye_retarget: false
   background: original     # original | color | image (image = output.background_path)

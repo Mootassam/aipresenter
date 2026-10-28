@@ -100,3 +100,20 @@ def test_green_share_counts_only_the_person() -> None:
     alpha = np.zeros((10, 10), np.float32)
     alpha[:, 3:] = 1.0  # the person covers columns 3-9: 2 of their 7 columns are green
     assert green_share(img, alpha) == pytest.approx(2 / 7)
+
+
+def test_sharpen_adds_detail_and_zero_is_the_old_result() -> None:
+    canvas, grid, mask, face, _, _ = _setup()
+    soft = Composer(canvas, grid, mask, sharpen=0.0).compose(face)
+    np.testing.assert_array_equal(soft, _full(canvas, grid, mask, face, None))
+    sharp = Composer(canvas, grid, mask, sharpen=1.0).compose(face)
+    inside = mask[0, 0].numpy() > 0.99
+
+    def detail(img: np.ndarray) -> float:
+        g = img.astype(np.float32).mean(-1)
+        lap = 4 * g[1:-1, 1:-1] - g[:-2, 1:-1] - g[2:, 1:-1] - g[1:-1, :-2] - g[1:-1, 2:]
+        return float(lap[inside[1:-1, 1:-1]].var())
+
+    assert detail(sharp) > 1.2 * detail(soft)
+    assert np.array_equal(sharp[~inside & (mask[0, 0].numpy() == 0)],
+                          soft[~inside & (mask[0, 0].numpy() == 0)])  # fmt: skip

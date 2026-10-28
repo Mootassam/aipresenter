@@ -153,7 +153,9 @@ class LivePortraitRenderer:
         mask = cv2.imread(str(_MASK), cv2.IMREAD_GRAYSCALE)
         mask_t = torch.from_numpy(mask).to(dev).float()[None, None] / 255
         self.mask = F.grid_sample(mask_t, self.grid, align_corners=False, padding_mode="zeros")
-        self.composer = Composer(self.canvas, self.grid, self.mask, bg=bg, key=key)
+        self.composer = Composer(
+            self.canvas, self.grid, self.mask, bg=bg, key=key, sharpen=cfg.face_sharpen
+        )
 
         # --- driving side state ---
         self.cropper = DrivingCropper()
@@ -324,6 +326,10 @@ class Composer:
     above zero) and only that part is computed and copied off the GPU; the rest comes from a
     ready-made still image. Outside that area the mask is exactly 0, so the result is identical
     to compositing the whole canvas.
+
+    The generator's 512 face is softer than the still (it works from a 256 copy) and is
+    enlarged onto the canvas (735 px for samples/character.png). ``sharpen`` > 0 pastes with
+    bicubic sampling and adds that much unsharp mask (sigma 1 px, in 512 space) first.
     """
 
     def __init__(
@@ -334,8 +340,13 @@ class Composer:
         *,
         bg: torch.Tensor | None = None,
         key: tuple[float, float, float] | None = None,
+        sharpen: float = 0.0,
     ) -> None:
         self.key = key if bg is not None else None
+        self.sharpen = sharpen
+        ax = torch.arange(7, dtype=torch.float32, device=canvas.device) - 3
+        g = torch.exp(-(ax**2) / 2)
+        self._blur_k = (g / g.sum()).repeat(3, 1, 1, 1)  # 3x1x1x7, sigma 1
         self._still = _to_bgr_u8(self._swap_bg(canvas, bg))
         ys, xs = torch.nonzero(mask[0, 0] > 0, as_tuple=True)
         if ys.numel() == 0:
@@ -351,6 +362,11 @@ class Composer:
     def _swap_bg(self, img: torch.Tensor, bg: torch.Tensor | None) -> torch.Tensor:
         return img if self.key is None or bg is None else key_out(img, bg, self.key)
 
+    def _blur(self, x: torch.Tensor) -> torch.Tensor:
+        k = self._blur_k
+        x = F.conv2d(F.pad(x, (3, 3, 0, 0), mode="replicate"), k, groups=3)
+        return F.conv2d(F.pad(x, (0, 0, 3, 3), mode="replicate"), k.transpose(2, 3), groups=3)
+
     def still(self) -> Image:
         """The character without animation (no face tracked yet)."""
         return self._still.copy()
@@ -360,7 +376,13 @@ class Composer:
         img = self._still.copy()
         y0, y1, x0, x1 = self.roi
         if y1 > y0 and x1 > x0:
-            pasted = F.grid_sample(face, self.grid, align_corners=False, padding_mode="zeros")
+            mode = "bilinear"
+            if self.sharpen > 0:
+                face = (face + self.sharpen * (face - self._blur(face))).clamp(0, 1)
+                mode = "bicubic"
+            pasted = F.grid_sample(
+                face, self.grid, mode=mode, align_corners=False, padding_mode="zeros"
+            )
             part = self.mask * pasted + (1 - self.mask) * self.canvas
             img[y0:y1, x0:x1] = _to_bgr_u8(self._swap_bg(part, self.bg_roi))
         return img

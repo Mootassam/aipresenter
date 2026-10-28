@@ -122,6 +122,9 @@ class AvatarConfig(_Section):
     """For this long after calibrating, the expression baseline moves to the calmest face seen
     (least smile, mouth closed). A user who smiles while calibrating would otherwise take away
     the character's own resting smile. 0 = keep the calibration frame's expression."""
+    face_sharpen: float = Field(0.8, ge=0.0, le=2.0)
+    """Unsharp mask on the animated face before it is pasted (0 = off). The generator's face is
+    ~5x softer than the still; 0.8 brings it close to the still without harsh skin."""
     stitching: bool = True
     """Blend the animated head into the still shoulders (strongly recommended)."""
     eye_retarget: bool = False

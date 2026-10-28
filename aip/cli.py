@@ -207,6 +207,8 @@ def cmd_track(args: argparse.Namespace) -> int:
         s.avatar.brow_raise_max = args.brow_max
     if args.neutral_window is not None:
         s.avatar.neutral_window_s = args.neutral_window
+    if args.sharpen is not None:
+        s.avatar.face_sharpen = args.sharpen
     if args.compile:
         s.avatar.compile = True
     if args.no_cuda_graphs:
@@ -335,6 +337,7 @@ def build_parser() -> argparse.ArgumentParser:
     tr.add_argument(
         "--neutral-window", type=float, help="seconds to find the calmest face (0 = off)"
     )
+    tr.add_argument("--sharpen", type=float, help="sharpen the animated face (0 = off)")
     tr.add_argument("--profile", action="store_true", help="exact per-step GPU timings (slower)")
     tr.add_argument("--record", metavar="MP4", help="also save the output to a video file")
     tr.add_argument("--compile", action="store_true", help="torch.compile the avatar (Linux)")
