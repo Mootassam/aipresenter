@@ -52,6 +52,7 @@ avatar:
   canvas_height: 768
   pose_strength: 1.0       # 0..2, how much head movement is copied
   expression_strength: 1.0 # 0..2
+  brow_raise_max: 0.015    # soft cap on brow raises (forehead wrinkles); 0 = no limit
   stitching: true
   eye_retarget: false
   background: original     # original | color | image (image = output.background_path)

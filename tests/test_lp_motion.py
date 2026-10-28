@@ -80,3 +80,30 @@ def test_params_roundtrip() -> None:
     p2[1] += 10  # yaw
     assert back.with_params(p2).yaw.item() == pytest.approx(-7 + 10, abs=1e-5)
     assert np.allclose(info.with_params(p2).to_params(), p2)
+
+
+def test_limit_brow_raise_caps_big_raises_softly() -> None:
+    from engine.avatar.liveportrait.motion import limit_brow_raise
+
+    exp0 = np.zeros(63, np.float32)
+    small, big = exp0.copy(), exp0.copy()
+    small[7], big[7] = -0.003, -0.04  # kp 2 y down = brows up
+    big[4] = 0.01  # kp 1 y moves up with it
+    out_small = limit_brow_raise(small, exp0, 0.015)
+    out_big = limit_brow_raise(big, exp0, 0.015)
+    assert out_small[7] == pytest.approx(-0.003, rel=0.02)  # normal talking passes through
+    assert -0.015 < out_big[7] < -0.014  # strong raise approaches the cap
+    assert 0 < out_big[4] < 0.01  # the side point is scaled by the same amount
+    assert np.array_equal(np.delete(out_big, [4, 7]), np.delete(big, [4, 7]))
+
+
+def test_limit_brow_raise_leaves_frowns_and_off_alone() -> None:
+    from engine.avatar.liveportrait.motion import limit_brow_raise
+
+    exp0 = np.full(63, 0.01, np.float32)
+    frown = exp0.copy()
+    frown[7] = 0.05
+    assert np.array_equal(limit_brow_raise(frown, exp0, 0.015), frown)
+    up = exp0.copy()
+    up[7] = -0.05
+    assert np.array_equal(limit_brow_raise(up, exp0, 0.0), up)

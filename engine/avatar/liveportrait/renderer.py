@@ -32,6 +32,7 @@ from engine.avatar.liveportrait.crop import (
 from engine.avatar.liveportrait.motion import (
     KpInfo,
     blend_toward,
+    limit_brow_raise,
     relative_keypoints,
     transform_keypoints,
 )
@@ -231,11 +232,12 @@ class LivePortraitRenderer:
             self._recalibrate = False
             log.info("calibrated neutral pose")
 
-        if self.cfg.expression_strength != 1.0:
-            k = self.cfg.expression_strength
+        k, brow_max = self.cfg.expression_strength, self.cfg.brow_raise_max
+        if k != 1.0 or brow_max > 0:
             exp0 = self.drv0.to_params()[_POSE_PARAMS:]
-            scaled = exp0 + (p[_POSE_PARAMS:] - exp0) * k
-            drv = info.with_params(np.concatenate([p[:_POSE_PARAMS], scaled]))
+            exp = exp0 + (p[_POSE_PARAMS:] - exp0) * k
+            exp = limit_brow_raise(exp, exp0, brow_max)
+            drv = info.with_params(np.concatenate([p[:_POSE_PARAMS], exp]))
 
         x_d = relative_keypoints(self.src, drv, self.drv0, pose_strength=self.cfg.pose_strength)
         if self.cfg.lip_sync != "off" and self.mouth is not None:

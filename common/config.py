@@ -115,6 +115,9 @@ class AvatarConfig(_Section):
     """The character is rendered at this height, then scaled to the output size."""
     pose_strength: float = Field(1.0, ge=0.0, le=2.0)
     expression_strength: float = Field(1.0, ge=0.0, le=2.0)
+    brow_raise_max: float = Field(0.015, ge=0.0, le=0.1)
+    """Soft limit on how far the character's brows go up (0 = no limit). Strong brow raises
+    put forehead wrinkles on her; 0.015 lets normal talking through and caps big raises."""
     stitching: bool = True
     """Blend the animated head into the still shoulders (strongly recommended)."""
     eye_retarget: bool = False

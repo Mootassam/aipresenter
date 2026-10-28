@@ -138,6 +138,35 @@ def relative_keypoints(
     return x
 
 
+# Brow raise in the expression offsets (measured on samples/talk.mp4 against MediaPipe brow
+# height): keypoint 2 y goes down (r = -0.76) and keypoint 1 y goes up a little. These are the
+# same two points LivePortrait's own eyebrow editor moves.
+_BROW_MAIN = 2 * 3 + 1  # flat exp index of kp 2, y
+_BROW_SIDE = 1 * 3 + 1  # kp 1, y
+
+
+def limit_brow_raise(
+    exp: npt.NDArray[np.float32], exp0: npt.NDArray[np.float32], max_raise: float
+) -> npt.NDArray[np.float32]:
+    """Softly cap how far the brows go up relative to the calibration expression ``exp0``.
+
+    Strong brow raises make the generator draw forehead wrinkles that the character doesn't
+    have, so she looks older. Small raises pass almost unchanged; big ones approach
+    ``max_raise`` (tanh knee). Lowering the brows (frowning) is not touched. ``exp`` and
+    ``exp0`` are flat (63,) expression vectors; returns a new array.
+    """
+    raise_ = float(exp0[_BROW_MAIN] - exp[_BROW_MAIN])
+    if max_raise <= 0 or raise_ <= 0:
+        return exp
+    k = max_raise * float(np.tanh(raise_ / max_raise)) / raise_
+    out = exp.copy()
+    out[_BROW_MAIN] = exp0[_BROW_MAIN] - raise_ * k
+    side = exp[_BROW_SIDE] - exp0[_BROW_SIDE]
+    if side > 0:  # moves up together with the brow raise
+        out[_BROW_SIDE] = exp0[_BROW_SIDE] + side * k
+    return out
+
+
 def blend_toward(x: torch.Tensor, target: torch.Tensor, alpha: float) -> torch.Tensor:
     """Linear blend used to ease back to the neutral pose when the face is lost."""
     return x + (target - x) * alpha

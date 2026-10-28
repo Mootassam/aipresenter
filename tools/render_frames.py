@@ -44,6 +44,9 @@ def main() -> int:
     ap.add_argument("--cpu", action="store_true")
     ap.add_argument("--mouth", type=float, help="also render with this voice openness (0-1)")
     ap.add_argument("--lip-strength", type=float, default=1.0)
+    ap.add_argument(
+        "--brow-compare", action="store_true", help="also render without the brow-raise limit"
+    )
     a = ap.parse_args()
 
     s = Settings()
@@ -102,6 +105,12 @@ def main() -> int:
         renderer.f_exp.reset()
         frame = Frame(frames[i], i, i * 1000 / fps)
         imgs = [renderer.render(frame, tracks[i]).copy()]
+        if a.brow_compare:  # order: driver | no limit | with limit
+            renderer.f_pose.reset()
+            renderer.f_exp.reset()
+            renderer.cfg = s.avatar.model_copy(update={"brow_raise_max": 0.0})
+            imgs.insert(0, renderer.render(frame, tracks[i]).copy())
+            renderer.cfg = s.avatar
         if a.mouth is not None:
             renderer.f_pose.reset()
             renderer.f_exp.reset()

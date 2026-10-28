@@ -105,6 +105,16 @@ Last updated: 2026-10-22
   the character (looks older); the resting smile is lost; the face is softer than the still.
 - This pod: real time 29.7 fps (the source's own 30 fps), delay p50 36 ms / p95 38 ms.
 
+### Fix 1: forehead wrinkles (2026-10-28, CPU-checked)
+- Owner picked fix (1). Expression keypoint 2 y (and a little kp 1 y) follows the brow height
+  (r = -0.76 vs MediaPipe). `limit_brow_raise` in `motion.py` softly caps brow raises against the
+  calibration expression (tanh knee, `avatar.brow_raise_max` 0.015, `--brow-max`, 0 = off).
+  Frowns are not touched. Tests in `tests/test_lp_motion.py`.
+- `tools/render_frames.py --brow-compare` renders driver | no limit | with limit
+  (`results/brow-check/`, frames 120, 906, 1359): at 1359 the wrinkles are gone, and the rest of
+  the expression is unchanged.
+- Next: fix (2) resting smile, then (3) sharpness, then the 8 GB card speed check.
+
 ## Waiting on the owner before Phase 2
 
 1. Install VB-Audio Virtual Cable (vb-audio.com/Cable) and restart the PC.
